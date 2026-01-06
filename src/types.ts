@@ -166,9 +166,22 @@ export interface MessageResponse {
   syncStatus?: SyncStatus;
 }
 
+// Display mode for blocking info
+export type DisplayMode = 'compact' | 'detailed';
+
+// User settings
+export interface UserSettings {
+  displayMode: DisplayMode; // 'compact' = single sentence, 'detailed' = avatars + names
+}
+
+export const DEFAULT_SETTINGS: UserSettings = {
+  displayMode: 'compact',
+};
+
 // Storage keys
 export const STORAGE_KEYS = {
   BLOCK_CACHE: 'blockCache',
   SYNC_STATUS: 'syncStatus',
   AUTH_TOKEN: 'authToken',
+  SETTINGS: 'settings',
 } as const;

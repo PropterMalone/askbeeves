@@ -95,6 +95,24 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// src/types.ts
+var DEFAULT_SETTINGS = {
+  displayMode: "compact"
+};
+var STORAGE_KEYS = {
+  BLOCK_CACHE: "blockCache",
+  SYNC_STATUS: "syncStatus",
+  AUTH_TOKEN: "authToken",
+  SETTINGS: "settings"
+};
+
+// src/storage.ts
+async function getSettings() {
+  const result = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+  const data = result[STORAGE_KEYS.SETTINGS];
+  return data || DEFAULT_SETTINGS;
+}
+
 // src/content.ts
 var currentObserver = null;
 var lastInjectedHandle = null;
@@ -312,6 +330,137 @@ function showFullListModal(users, title) {
   });
   document.body.appendChild(overlay);
 }
+function createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick) {
+  const container = document.createElement("div");
+  container.id = "askbeeves-blocking-container";
+  container.style.cssText = `
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0;
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 18px;
+    color: rgb(66, 87, 108);
+  `;
+  const blockedByCount = blockingInfo.blockedBy.length;
+  const blockingCount = blockingInfo.blocking.length;
+  if (blockedByCount === 0 && blockingCount === 0) {
+    container.textContent = "Not blocked by or blocking anyone you follow.";
+    return container;
+  }
+  if (blockedByCount > 0) {
+    const blockedBySpan = document.createElement("span");
+    blockedBySpan.style.cssText = "cursor: pointer;";
+    blockedBySpan.textContent = `Blocked by ${blockedByCount} ${blockedByCount === 1 ? "person" : "people"} you follow`;
+    blockedBySpan.addEventListener("click", onBlockedByClick);
+    blockedBySpan.addEventListener("mouseenter", () => {
+      blockedBySpan.style.textDecoration = "underline";
+    });
+    blockedBySpan.addEventListener("mouseleave", () => {
+      blockedBySpan.style.textDecoration = "none";
+    });
+    container.appendChild(blockedBySpan);
+  } else {
+    const noBlockedBy = document.createElement("span");
+    noBlockedBy.textContent = "Not blocked by anyone you follow";
+    container.appendChild(noBlockedBy);
+  }
+  const separator = document.createElement("span");
+  separator.textContent = " and ";
+  container.appendChild(separator);
+  if (blockingCount > 0) {
+    const blockingSpan = document.createElement("span");
+    blockingSpan.style.cssText = "cursor: pointer;";
+    blockingSpan.textContent = `blocking ${blockingCount} ${blockingCount === 1 ? "person" : "people"} you follow`;
+    blockingSpan.addEventListener("click", onBlockingClick);
+    blockingSpan.addEventListener("mouseenter", () => {
+      blockingSpan.style.textDecoration = "underline";
+    });
+    blockingSpan.addEventListener("mouseleave", () => {
+      blockingSpan.style.textDecoration = "none";
+    });
+    container.appendChild(blockingSpan);
+  } else {
+    const noBlocking = document.createElement("span");
+    noBlocking.textContent = "not blocking anyone you follow";
+    container.appendChild(noBlocking);
+  }
+  const period = document.createElement("span");
+  period.textContent = ".";
+  container.appendChild(period);
+  return container;
+}
+function createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick) {
+  const container = document.createElement("div");
+  container.id = "askbeeves-blocking-container";
+  container.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  `;
+  const createBlockRow = (users, label, onClick) => {
+    const row = document.createElement("div");
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      line-height: 18px;
+      color: rgb(66, 87, 108);
+      cursor: pointer;
+    `;
+    const sampled = randomSample(users, 3);
+    const avatarRow = createAvatarRow(sampled);
+    row.appendChild(avatarRow);
+    const textSpan = document.createElement("span");
+    const displayNames = formatUserList(sampled.slice(0, 2), users.length);
+    textSpan.textContent = `${label} ${displayNames}`;
+    row.appendChild(textSpan);
+    row.addEventListener("click", onClick);
+    row.addEventListener("mouseenter", () => {
+      row.style.textDecoration = "underline";
+    });
+    row.addEventListener("mouseleave", () => {
+      row.style.textDecoration = "none";
+    });
+    return row;
+  };
+  const createTextOnlyRow = (text) => {
+    const row = document.createElement("div");
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      font-size: 13px;
+      line-height: 18px;
+      color: rgb(66, 87, 108);
+    `;
+    row.textContent = text;
+    return row;
+  };
+  if (blockingInfo.blockedBy.length > 0) {
+    const blockedByRow = createBlockRow(
+      blockingInfo.blockedBy,
+      "Blocked by",
+      onBlockedByClick
+    );
+    container.appendChild(blockedByRow);
+  } else {
+    container.appendChild(createTextOnlyRow("Not blocked by anyone you follow"));
+  }
+  if (blockingInfo.blocking.length > 0) {
+    const blockingRow = createBlockRow(
+      blockingInfo.blocking,
+      "Blocking",
+      onBlockingClick
+    );
+    container.appendChild(blockingRow);
+  } else {
+    container.appendChild(createTextOnlyRow("Not blocking anyone you follow"));
+  }
+  return container;
+}
 async function waitForFollowedBy(maxWaitMs = 3e3) {
   const startTime = Date.now();
   while (Date.now() - startTime < maxWaitMs) {
@@ -373,75 +522,27 @@ async function injectBlockingInfo() {
     blockingInfo.blocking.length,
     "blocking"
   );
-  const container = document.createElement("div");
-  container.id = "askbeeves-blocking-container";
-  container.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 8px;
-  `;
-  const createBlockRow = (users, label, modalTitle) => {
-    const row = document.createElement("div");
-    row.style.cssText = `
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 13px;
-      line-height: 18px;
-      color: rgb(66, 87, 108);
-      cursor: pointer;
-    `;
-    const sampled = randomSample(users, 3);
-    const avatarRow = createAvatarRow(sampled);
-    row.appendChild(avatarRow);
-    const textSpan = document.createElement("span");
-    const displayNames = formatUserList(sampled.slice(0, 2), users.length);
-    textSpan.textContent = `${label} ${displayNames}`;
-    row.appendChild(textSpan);
-    row.addEventListener("click", () => {
-      showFullListModal(users, modalTitle);
-    });
-    row.addEventListener("mouseenter", () => {
-      row.style.textDecoration = "underline";
-    });
-    row.addEventListener("mouseleave", () => {
-      row.style.textDecoration = "none";
-    });
-    return row;
-  };
-  const createTextOnlyRow = (text) => {
-    const row = document.createElement("div");
-    row.style.cssText = `
-      display: flex;
-      align-items: center;
-      font-size: 13px;
-      line-height: 18px;
-      color: rgb(66, 87, 108);
-    `;
-    row.textContent = text;
-    return row;
-  };
-  if (blockingInfo.blockedBy.length > 0) {
-    const blockedByRow = createBlockRow(
+  let displayMode = "compact";
+  try {
+    const settings = await getSettings();
+    displayMode = settings.displayMode;
+  } catch (error) {
+    console.log("[AskBeeves] Could not load settings, using default:", error);
+  }
+  console.log("[AskBeeves] Display mode:", displayMode);
+  const onBlockedByClick = () => {
+    showFullListModal(
       blockingInfo.blockedBy,
-      "Blocked by",
       "Blocked by (users you follow who block this profile)"
     );
-    container.appendChild(blockedByRow);
-  } else {
-    container.appendChild(createTextOnlyRow("Not blocked by anyone you follow"));
-  }
-  if (blockingInfo.blocking.length > 0) {
-    const blockingRow = createBlockRow(
+  };
+  const onBlockingClick = () => {
+    showFullListModal(
       blockingInfo.blocking,
-      "Blocking",
       "Blocking (users you follow that this profile blocks)"
     );
-    container.appendChild(blockingRow);
-  } else {
-    container.appendChild(createTextOnlyRow("Not blocking anyone you follow"));
-  }
+  };
+  const container = displayMode === "compact" ? createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick) : createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick);
   if (followedByElement.nextSibling) {
     followedByElement.parentNode?.insertBefore(container, followedByElement.nextSibling);
   } else {

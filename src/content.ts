@@ -4,7 +4,8 @@
  */
 
 import { getSession, getProfile } from './api.js';
-import { BlockingInfo, Message } from './types.js';
+import { getSettings } from './storage.js';
+import { BlockingInfo, Message, DisplayMode } from './types.js';
 
 let currentObserver: MutationObserver | null = null;
 let lastInjectedHandle: string | null = null;
@@ -298,6 +299,189 @@ function showFullListModal(
 }
 
 /**
+ * Create compact display mode: "Blocked by X people you follow and blocking Y people you follow."
+ */
+function createCompactDisplay(
+  blockingInfo: BlockingInfo,
+  onBlockedByClick: () => void,
+  onBlockingClick: () => void
+): HTMLElement {
+  const container = document.createElement('div');
+  container.id = 'askbeeves-blocking-container';
+  container.style.cssText = `
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0;
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 18px;
+    color: rgb(66, 87, 108);
+  `;
+
+  const blockedByCount = blockingInfo.blockedBy.length;
+  const blockingCount = blockingInfo.blocking.length;
+
+  // If nothing to show
+  if (blockedByCount === 0 && blockingCount === 0) {
+    container.textContent = 'Not blocked by or blocking anyone you follow.';
+    return container;
+  }
+
+  // Create clickable "blocked by X" part
+  if (blockedByCount > 0) {
+    const blockedBySpan = document.createElement('span');
+    blockedBySpan.style.cssText = 'cursor: pointer;';
+    blockedBySpan.textContent = `Blocked by ${blockedByCount} ${blockedByCount === 1 ? 'person' : 'people'} you follow`;
+    blockedBySpan.addEventListener('click', onBlockedByClick);
+    blockedBySpan.addEventListener('mouseenter', () => {
+      blockedBySpan.style.textDecoration = 'underline';
+    });
+    blockedBySpan.addEventListener('mouseleave', () => {
+      blockedBySpan.style.textDecoration = 'none';
+    });
+    container.appendChild(blockedBySpan);
+  } else {
+    const noBlockedBy = document.createElement('span');
+    noBlockedBy.textContent = 'Not blocked by anyone you follow';
+    container.appendChild(noBlockedBy);
+  }
+
+  // Separator
+  const separator = document.createElement('span');
+  separator.textContent = ' and ';
+  container.appendChild(separator);
+
+  // Create clickable "blocking Y" part
+  if (blockingCount > 0) {
+    const blockingSpan = document.createElement('span');
+    blockingSpan.style.cssText = 'cursor: pointer;';
+    blockingSpan.textContent = `blocking ${blockingCount} ${blockingCount === 1 ? 'person' : 'people'} you follow`;
+    blockingSpan.addEventListener('click', onBlockingClick);
+    blockingSpan.addEventListener('mouseenter', () => {
+      blockingSpan.style.textDecoration = 'underline';
+    });
+    blockingSpan.addEventListener('mouseleave', () => {
+      blockingSpan.style.textDecoration = 'none';
+    });
+    container.appendChild(blockingSpan);
+  } else {
+    const noBlocking = document.createElement('span');
+    noBlocking.textContent = 'not blocking anyone you follow';
+    container.appendChild(noBlocking);
+  }
+
+  // Period
+  const period = document.createElement('span');
+  period.textContent = '.';
+  container.appendChild(period);
+
+  return container;
+}
+
+/**
+ * Create detailed display mode: avatars + names (like "Followed by")
+ */
+function createDetailedDisplay(
+  blockingInfo: BlockingInfo,
+  onBlockedByClick: () => void,
+  onBlockingClick: () => void
+): HTMLElement {
+  const container = document.createElement('div');
+  container.id = 'askbeeves-blocking-container';
+  container.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 8px;
+  `;
+
+  // Helper function to create a row with avatars + text (like "Followed by")
+  const createBlockRow = (
+    users: Array<{ displayName?: string; handle: string; avatar?: string }>,
+    label: string,
+    onClick: () => void
+  ): HTMLElement => {
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 13px;
+      line-height: 18px;
+      color: rgb(66, 87, 108);
+      cursor: pointer;
+    `;
+
+    // Sample once for consistency between avatars and text
+    const sampled = randomSample(users, 3);
+
+    // Add avatars (3 max, matching "Followed by" style)
+    const avatarRow = createAvatarRow(sampled);
+    row.appendChild(avatarRow);
+
+    // Add text (show 2 names max in text, but avatars show 3)
+    const textSpan = document.createElement('span');
+    const displayNames = formatUserList(sampled.slice(0, 2), users.length);
+    textSpan.textContent = `${label} ${displayNames}`;
+    row.appendChild(textSpan);
+
+    // Make entire row clickable to show modal
+    row.addEventListener('click', onClick);
+
+    // Hover effect
+    row.addEventListener('mouseenter', () => {
+      row.style.textDecoration = 'underline';
+    });
+    row.addEventListener('mouseleave', () => {
+      row.style.textDecoration = 'none';
+    });
+
+    return row;
+  };
+
+  // Helper function to create a text-only row (for "not blocked" messages)
+  const createTextOnlyRow = (text: string): HTMLElement => {
+    const row = document.createElement('div');
+    row.style.cssText = `
+      display: flex;
+      align-items: center;
+      font-size: 13px;
+      line-height: 18px;
+      color: rgb(66, 87, 108);
+    `;
+    row.textContent = text;
+    return row;
+  };
+
+  // "Blocked by" section
+  if (blockingInfo.blockedBy.length > 0) {
+    const blockedByRow = createBlockRow(
+      blockingInfo.blockedBy,
+      'Blocked by',
+      onBlockedByClick
+    );
+    container.appendChild(blockedByRow);
+  } else {
+    container.appendChild(createTextOnlyRow('Not blocked by anyone you follow'));
+  }
+
+  // "Blocking" section
+  if (blockingInfo.blocking.length > 0) {
+    const blockingRow = createBlockRow(
+      blockingInfo.blocking,
+      'Blocking',
+      onBlockingClick
+    );
+    container.appendChild(blockingRow);
+  } else {
+    container.appendChild(createTextOnlyRow('Not blocking anyone you follow'));
+  }
+
+  return container;
+}
+
+/**
  * Wait for "Followed by" element to appear (with timeout)
  */
 async function waitForFollowedBy(maxWaitMs: number = 3000): Promise<HTMLElement | null> {
@@ -379,98 +563,36 @@ async function injectBlockingInfo(): Promise<void> {
     'blocking'
   );
 
-  const container = document.createElement('div');
-  container.id = 'askbeeves-blocking-container';
-  container.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 8px;
-  `;
+  // Get display mode setting
+  let displayMode: DisplayMode = 'compact';
+  try {
+    const settings = await getSettings();
+    displayMode = settings.displayMode;
+  } catch (error) {
+    console.log('[AskBeeves] Could not load settings, using default:', error);
+  }
 
-  // Helper function to create a row with avatars + text (like "Followed by")
-  const createBlockRow = (
-    users: Array<{ displayName?: string; handle: string; avatar?: string }>,
-    label: string,
-    modalTitle: string
-  ): HTMLElement => {
-    const row = document.createElement('div');
-    row.style.cssText = `
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      font-size: 13px;
-      line-height: 18px;
-      color: rgb(66, 87, 108);
-      cursor: pointer;
-    `;
+  console.log('[AskBeeves] Display mode:', displayMode);
 
-    // Sample once for consistency between avatars and text
-    const sampled = randomSample(users, 3);
-
-    // Add avatars (3 max, matching "Followed by" style)
-    const avatarRow = createAvatarRow(sampled);
-    row.appendChild(avatarRow);
-
-    // Add text (show 2 names max in text, but avatars show 3)
-    const textSpan = document.createElement('span');
-    const displayNames = formatUserList(sampled.slice(0, 2), users.length);
-    textSpan.textContent = `${label} ${displayNames}`;
-    row.appendChild(textSpan);
-
-    // Make entire row clickable to show modal
-    row.addEventListener('click', () => {
-      showFullListModal(users, modalTitle);
-    });
-
-    // Hover effect
-    row.addEventListener('mouseenter', () => {
-      row.style.textDecoration = 'underline';
-    });
-    row.addEventListener('mouseleave', () => {
-      row.style.textDecoration = 'none';
-    });
-
-    return row;
-  };
-
-  // Helper function to create a text-only row (for "not blocked" messages)
-  const createTextOnlyRow = (text: string): HTMLElement => {
-    const row = document.createElement('div');
-    row.style.cssText = `
-      display: flex;
-      align-items: center;
-      font-size: 13px;
-      line-height: 18px;
-      color: rgb(66, 87, 108);
-    `;
-    row.textContent = text;
-    return row;
-  };
-
-  // "Blocked by" section
-  if (blockingInfo.blockedBy.length > 0) {
-    const blockedByRow = createBlockRow(
+  // Click handlers for modals
+  const onBlockedByClick = () => {
+    showFullListModal(
       blockingInfo.blockedBy,
-      'Blocked by',
       'Blocked by (users you follow who block this profile)'
     );
-    container.appendChild(blockedByRow);
-  } else {
-    container.appendChild(createTextOnlyRow('Not blocked by anyone you follow'));
-  }
+  };
 
-  // "Blocking" section
-  if (blockingInfo.blocking.length > 0) {
-    const blockingRow = createBlockRow(
+  const onBlockingClick = () => {
+    showFullListModal(
       blockingInfo.blocking,
-      'Blocking',
       'Blocking (users you follow that this profile blocks)'
     );
-    container.appendChild(blockingRow);
-  } else {
-    container.appendChild(createTextOnlyRow('Not blocking anyone you follow'));
-  }
+  };
+
+  // Create display based on mode
+  const container = displayMode === 'compact'
+    ? createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick)
+    : createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick);
 
   // Insert after "Followed by" element
   if (followedByElement.nextSibling) {
