@@ -80,7 +80,15 @@ export interface ListRecordsResponse {
   cursor?: string;
 }
 
-// Cached block list for a single user
+// Bloom filter data structure (re-exported from bloom.ts for convenience)
+export interface BloomFilterData {
+  bits: string; // Base64-encoded bit array
+  size: number; // Number of bits in the filter
+  numHashes: number; // Number of hash functions used
+  count: number; // Number of elements added
+}
+
+// Cached block list for a single user (legacy - full DID array)
 export interface UserBlockCache {
   did: string;
   handle: string;
@@ -90,10 +98,21 @@ export interface UserBlockCache {
   lastSynced: number;
 }
 
-// Main cache structure stored in chrome.storage.local
+// Space-efficient block cache using bloom filter (hybrid approach)
+export interface UserBlockBloomCache {
+  did: string;
+  handle: string;
+  displayName?: string;
+  avatar?: string;
+  bloomFilter: BloomFilterData; // Bloom filter for "might contain" checks
+  blockCount: number; // Total number of blocks (for stats)
+  lastSynced: number;
+}
+
+// Main cache structure stored in chrome.storage.local (bloom filter version)
 export interface BlockCacheData {
   followedUsers: FollowedUser[];
-  userBlockCaches: Record<string, UserBlockCache>;
+  userBlockCaches: Record<string, UserBlockBloomCache>; // Now uses bloom filters
   lastFullSync: number;
   currentUserDid: string;
 }
