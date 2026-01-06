@@ -20,6 +20,42 @@ const BSKY_PDS_DEFAULT = 'https://bsky.social';
 // PLC directory for DID resolution
 const PLC_DIRECTORY = 'https://plc.directory';
 
+// In-memory PDS URL cache to avoid repeated resolution during a session
+const pdsCache = new Map<string, string>();
+
+/**
+ * Populate the PDS cache from stored data
+ * Called by background script on startup
+ */
+export function populatePdsCache(entries: Array<{ did: string; pdsUrl: string }>): void {
+  for (const entry of entries) {
+    if (entry.pdsUrl) {
+      pdsCache.set(entry.did, entry.pdsUrl);
+    }
+  }
+}
+
+/**
+ * Get cached PDS URL if available
+ */
+export function getCachedPds(did: string): string | undefined {
+  return pdsCache.get(did);
+}
+
+/**
+ * Cache a PDS URL for a DID
+ */
+export function cachePds(did: string, pdsUrl: string): void {
+  pdsCache.set(did, pdsUrl);
+}
+
+/**
+ * Clear the PDS cache (for testing)
+ */
+export function clearPdsCache(): void {
+  pdsCache.clear();
+}
+
 // Helper to safely access localStorage
 const getLocalStorage = () => {
   if (typeof window !== 'undefined' && window.localStorage) {
@@ -103,6 +139,7 @@ export function getSession(): BskySession | null {
 
 /**
  * Resolve a DID to its PDS URL via PLC directory
+ * Uses in-memory cache to avoid repeated lookups
  */
 export async function resolvePds(did: string): Promise<string | null> {
   try {
@@ -110,12 +147,25 @@ export async function resolvePds(did: string): Promise<string | null> {
       return null;
     }
 
+    // Check cache first
+    const cached = pdsCache.get(did);
+    if (cached) {
+      return cached;
+    }
+
     const response = await fetch(`${PLC_DIRECTORY}/${did}`);
     if (!response.ok) return null;
 
     const doc = (await response.json()) as PlcDocument;
     const pds = doc.service?.find((s) => s.id === '#atproto_pds');
-    return pds?.serviceEndpoint || null;
+    const pdsUrl = pds?.serviceEndpoint || null;
+
+    // Cache the result
+    if (pdsUrl) {
+      pdsCache.set(did, pdsUrl);
+    }
+
+    return pdsUrl;
   } catch {
     return null;
   }

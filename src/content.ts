@@ -11,6 +11,10 @@ let currentObserver: MutationObserver | null = null;
 let lastInjectedHandle: string | null = null;
 let injectionInProgress = false;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let containerGuardObserver: MutationObserver | null = null;
+let lastBlockingInfo: BlockingInfo | null = null;
+let lastDisplayMode: DisplayMode = 'compact';
+let lastProfileDid: string | null = null;
 
 /**
  * Extract profile handle from the URL
@@ -21,40 +25,82 @@ function getProfileHandleFromUrl(): string | null {
 }
 
 /**
- * Find the "Followed by X" row container via XPath
- * Returns the parent row element so we can insert after the whole row
+ * Find the profile description/bio element to insert our display after
+ * Tries multiple strategies to find the right insertion point
  */
-function findFollowedByElement(): HTMLElement | null {
-  const xpath = "//*[contains(text(), 'Followed by')]";
-  const result = document.evaluate(
-    xpath,
+function findProfileInsertionPoint(): HTMLElement | null {
+  // Strategy 1: Find "Followed by X" row (most reliable when present)
+  const followedByXpath = "//*[contains(text(), 'Followed by')]";
+  const followedByResult = document.evaluate(
+    followedByXpath,
     document,
     null,
     XPathResult.FIRST_ORDERED_NODE_TYPE,
     null
   );
-  const textElement = result.singleNodeValue as HTMLElement | null;
-  if (!textElement) return null;
+  const followedByElement = followedByResult.singleNodeValue as HTMLElement | null;
 
-  // Walk up to find the row container (usually has display:flex and contains the avatars)
-  let parent = textElement.parentElement;
-  while (parent) {
-    const style = window.getComputedStyle(parent);
-    // Look for a flex container that's a direct child of a column flex container
-    if (style.display === 'flex' && style.flexDirection === 'row') {
-      const grandparent = parent.parentElement;
-      if (grandparent) {
-        const gpStyle = window.getComputedStyle(grandparent);
-        if (gpStyle.display === 'flex' && gpStyle.flexDirection === 'column') {
-          return parent; // This is the row we want to insert after
+  if (followedByElement) {
+    // Walk up to find the row container
+    let parent = followedByElement.parentElement;
+    while (parent) {
+      const style = window.getComputedStyle(parent);
+      if (style.display === 'flex' && style.flexDirection === 'row') {
+        const grandparent = parent.parentElement;
+        if (grandparent) {
+          const gpStyle = window.getComputedStyle(grandparent);
+          if (gpStyle.display === 'flex' && gpStyle.flexDirection === 'column') {
+            return parent;
+          }
         }
       }
+      parent = parent.parentElement;
     }
-    parent = parent.parentElement;
+    return followedByElement.parentElement;
   }
 
-  // Fallback: return the text element's parent
-  return textElement.parentElement;
+  // Strategy 2: Find the profile stats row (followers/following counts)
+  // Look for elements containing "followers" text
+  const followersXpath = "//*[contains(text(), 'followers')]";
+  const followersResult = document.evaluate(
+    followersXpath,
+    document,
+    null,
+    XPathResult.FIRST_ORDERED_NODE_TYPE,
+    null
+  );
+  const followersElement = followersResult.singleNodeValue as HTMLElement | null;
+
+  if (followersElement) {
+    // Walk up to find a suitable container
+    let parent = followersElement.parentElement;
+    let depth = 0;
+    while (parent && depth < 5) {
+      const style = window.getComputedStyle(parent);
+      if (style.display === 'flex') {
+        return parent;
+      }
+      parent = parent.parentElement;
+      depth++;
+    }
+    return followersElement.parentElement;
+  }
+
+  // Strategy 3: Find profile bio/description area by looking for the profile header structure
+  // Bluesky profiles have a specific structure with avatar, name, handle, bio
+  const profileSelectors = [
+    '[data-testid="profileHeaderDescription"]',
+    '[data-testid="profileHeader"]',
+  ];
+
+  for (const selector of profileSelectors) {
+    const element = document.querySelector(selector) as HTMLElement | null;
+    if (element) {
+      return element;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -175,7 +221,7 @@ function createAvatarRow(
  * Create a modal to show all users in a list
  */
 function showFullListModal(
-  users: Array<{ displayName?: string; handle: string; avatar?: string }>,
+  users: Array<{ displayName?: string; handle: string; avatar?: string; did?: string }>,
   title: string
 ): void {
   // Remove any existing modal
@@ -299,6 +345,172 @@ function showFullListModal(
 }
 
 /**
+ * Show a modal with verified blockers (verifies bloom filter candidates on click)
+ */
+async function showVerifiedBlockersModal(
+  candidateUsers: Array<{ displayName?: string; handle: string; avatar?: string; did: string }>,
+  profileDid: string,
+  title: string
+): Promise<void> {
+  // Remove any existing modal
+  const existing = document.getElementById('askbeeves-full-list-modal');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'askbeeves-full-list-modal';
+  overlay.style.cssText = `
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10001;
+  `;
+
+  const dialog = document.createElement('div');
+  dialog.style.cssText = `
+    background: white;
+    border-radius: 12px;
+    padding: 20px;
+    min-width: 320px;
+    max-width: 480px;
+    max-height: 60vh;
+    overflow-y: auto;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  `;
+
+  const titleEl = document.createElement('h3');
+  titleEl.style.cssText = `
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: #425780;
+  `;
+  titleEl.textContent = title;
+
+  const listEl = document.createElement('div');
+  listEl.style.cssText = `
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  `;
+
+  // Show loading state
+  const loadingEl = document.createElement('div');
+  loadingEl.style.cssText = `
+    text-align: center;
+    padding: 20px;
+    color: #687882;
+  `;
+  loadingEl.textContent = 'Verifying blockers...';
+  listEl.appendChild(loadingEl);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.style.cssText = `
+    margin-top: 16px;
+    padding: 10px 16px;
+    border: none;
+    border-radius: 8px;
+    background: #1083fe;
+    color: white;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    width: 100%;
+  `;
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', () => overlay.remove());
+
+  dialog.appendChild(titleEl);
+  dialog.appendChild(listEl);
+  dialog.appendChild(closeBtn);
+  overlay.appendChild(dialog);
+
+  // Close on overlay click
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) overlay.remove();
+  });
+
+  document.body.appendChild(overlay);
+
+  // Now verify the candidates
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'GET_VERIFIED_BLOCKERS',
+      profileDid,
+      candidateDids: candidateUsers.map((u) => u.did),
+    } as Message);
+
+    // Clear loading state
+    listEl.innerHTML = '';
+
+    if (!response?.success || !response.verifiedBlockers) {
+      listEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc2626;">Failed to verify blockers</div>';
+      return;
+    }
+
+    const verifiedBlockers = response.verifiedBlockers as Array<{ displayName?: string; handle: string; avatar?: string }>;
+
+    if (verifiedBlockers.length === 0) {
+      listEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #687882;">No verified blockers found</div>';
+      return;
+    }
+
+    // Display verified blockers
+    for (const user of verifiedBlockers) {
+      const item = document.createElement('div');
+      item.style.cssText = `
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 0;
+        border-bottom: 1px solid #e5e7eb;
+      `;
+
+      const avatar = document.createElement('img');
+      avatar.src = user.avatar || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
+      avatar.alt = user.displayName || user.handle;
+      avatar.style.cssText = `
+        width: 32px;
+        height: 32px;
+        border-radius: 50%;
+        object-fit: cover;
+      `;
+      avatar.onerror = () => {
+        avatar.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
+      };
+
+      const textContainer = document.createElement('div');
+      textContainer.style.cssText = `display: flex; flex-direction: column;`;
+
+      if (user.displayName) {
+        const displayNameEl = document.createElement('span');
+        displayNameEl.style.cssText = `font-size: 14px; font-weight: 600; color: #1a1a1a;`;
+        displayNameEl.textContent = user.displayName;
+        textContainer.appendChild(displayNameEl);
+      }
+
+      const handleEl = document.createElement('span');
+      handleEl.style.cssText = `font-size: 13px; color: #687882;`;
+      handleEl.textContent = `@${user.handle}`;
+      textContainer.appendChild(handleEl);
+
+      item.appendChild(avatar);
+      item.appendChild(textContainer);
+      listEl.appendChild(item);
+    }
+  } catch (error) {
+    console.error('[AskBeeves] Error verifying blockers:', error);
+    listEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc2626;">Error verifying blockers</div>';
+  }
+}
+
+/**
  * Create compact display mode: "Blocked by X people you follow and blocking Y people you follow."
  */
 function createCompactDisplay(
@@ -309,10 +521,6 @@ function createCompactDisplay(
   const container = document.createElement('div');
   container.id = 'askbeeves-blocking-container';
   container.style.cssText = `
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0;
     margin-top: 8px;
     font-size: 13px;
     line-height: 18px;
@@ -322,17 +530,31 @@ function createCompactDisplay(
   const blockedByCount = blockingInfo.blockedBy.length;
   const blockingCount = blockingInfo.blocking.length;
 
+  console.log('[AskBeeves] Compact display - blockedBy:', blockedByCount, 'blocking:', blockingCount);
+
   // If nothing to show
   if (blockedByCount === 0 && blockingCount === 0) {
     container.textContent = 'Not blocked by or blocking anyone you follow.';
     return container;
   }
 
-  // Create clickable "blocked by X" part
+  // Build the sentence with proper spacing using innerHTML
+  // This avoids flex container whitespace issues
+  const blockedByText =
+    blockedByCount > 0
+      ? `Blocked by ${blockedByCount} ${blockedByCount === 1 ? 'person' : 'people'} you follow`
+      : 'Not blocked by anyone you follow';
+
+  const blockingText =
+    blockingCount > 0
+      ? `blocking ${blockingCount} ${blockingCount === 1 ? 'person' : 'people'} you follow`
+      : 'not blocking anyone you follow';
+
+  // Create clickable span for blocked by (only if there are blockers)
   if (blockedByCount > 0) {
     const blockedBySpan = document.createElement('span');
     blockedBySpan.style.cssText = 'cursor: pointer;';
-    blockedBySpan.textContent = `Blocked by ${blockedByCount} ${blockedByCount === 1 ? 'person' : 'people'} you follow`;
+    blockedBySpan.textContent = blockedByText;
     blockedBySpan.addEventListener('click', onBlockedByClick);
     blockedBySpan.addEventListener('mouseenter', () => {
       blockedBySpan.style.textDecoration = 'underline';
@@ -342,21 +564,17 @@ function createCompactDisplay(
     });
     container.appendChild(blockedBySpan);
   } else {
-    const noBlockedBy = document.createElement('span');
-    noBlockedBy.textContent = 'Not blocked by anyone you follow';
-    container.appendChild(noBlockedBy);
+    container.appendChild(document.createTextNode(blockedByText));
   }
 
-  // Separator
-  const separator = document.createElement('span');
-  separator.textContent = ' and ';
-  container.appendChild(separator);
+  // Add separator as text node
+  container.appendChild(document.createTextNode(' and '));
 
-  // Create clickable "blocking Y" part
+  // Create clickable span for blocking (only if there are blocks)
   if (blockingCount > 0) {
     const blockingSpan = document.createElement('span');
     blockingSpan.style.cssText = 'cursor: pointer;';
-    blockingSpan.textContent = `blocking ${blockingCount} ${blockingCount === 1 ? 'person' : 'people'} you follow`;
+    blockingSpan.textContent = blockingText;
     blockingSpan.addEventListener('click', onBlockingClick);
     blockingSpan.addEventListener('mouseenter', () => {
       blockingSpan.style.textDecoration = 'underline';
@@ -366,15 +584,11 @@ function createCompactDisplay(
     });
     container.appendChild(blockingSpan);
   } else {
-    const noBlocking = document.createElement('span');
-    noBlocking.textContent = 'not blocking anyone you follow';
-    container.appendChild(noBlocking);
+    container.appendChild(document.createTextNode(blockingText));
   }
 
-  // Period
-  const period = document.createElement('span');
-  period.textContent = '.';
-  container.appendChild(period);
+  // Add period
+  container.appendChild(document.createTextNode('.'));
 
   return container;
 }
@@ -482,47 +696,166 @@ function createDetailedDisplay(
 }
 
 /**
- * Wait for "Followed by" element to appear (with timeout)
+ * Create and inject the blocking info container, guarding against React removal
  */
-async function waitForFollowedBy(maxWaitMs: number = 3000): Promise<HTMLElement | null> {
-  const startTime = Date.now();
-  while (Date.now() - startTime < maxWaitMs) {
-    const element = findFollowedByElement();
-    if (element) return element;
-    await new Promise((resolve) => setTimeout(resolve, 100));
+function injectContainer(
+  insertionPoint: HTMLElement,
+  blockingInfo: BlockingInfo,
+  displayMode: DisplayMode,
+  profileDid: string
+): void {
+  // Click handlers for modals
+  // For "blocked by", use verification modal since bloom filter candidates may have false positives
+  const onBlockedByClick = () => {
+    // Convert to the format needed for verification (need DIDs)
+    const candidatesWithDids = blockingInfo.blockedBy.map((u) => ({
+      ...u,
+      did: u.did,
+    }));
+    showVerifiedBlockersModal(
+      candidatesWithDids,
+      profileDid,
+      'Blocked by (users you follow who block this profile)'
+    );
+  };
+
+  // For "blocking", no verification needed - we fetched actual blocks from the profile
+  const onBlockingClick = () => {
+    showFullListModal(
+      blockingInfo.blocking,
+      'Blocking (users you follow that this profile blocks)'
+    );
+  };
+
+  // Create display based on mode
+  const container = displayMode === 'compact'
+    ? createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick)
+    : createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick);
+
+  // Insert after the insertion point
+  if (insertionPoint.nextSibling) {
+    insertionPoint.parentNode?.insertBefore(container, insertionPoint.nextSibling);
+  } else {
+    insertionPoint.parentNode?.appendChild(container);
   }
-  return null;
+
+  console.log('[AskBeeves] Container injected into DOM');
 }
 
 /**
- * Inject blocking info UI below the "Followed by" element
+ * Start guarding the container against React removal
+ * Watches for removal and re-injects if needed
+ */
+function startContainerGuard(): void {
+  // Stop any existing guard
+  if (containerGuardObserver) {
+    containerGuardObserver.disconnect();
+    containerGuardObserver = null;
+  }
+
+  // Create a guard that watches for our container being removed
+  containerGuardObserver = new MutationObserver(() => {
+    // Check if our container still exists
+    const container = document.getElementById('askbeeves-blocking-container');
+    if (container) {
+      return; // Container still exists, nothing to do
+    }
+
+    // Container was removed - check if we should re-inject
+    const handle = getProfileHandleFromUrl();
+    if (!handle || handle !== lastInjectedHandle || !lastBlockingInfo || !lastProfileDid) {
+      return; // Different page or no data
+    }
+
+    console.log('[AskBeeves] Container was removed by React, re-injecting...');
+
+    // Find insertion point again and re-inject
+    const insertionPoint = findProfileInsertionPoint();
+    if (insertionPoint) {
+      injectContainer(insertionPoint, lastBlockingInfo, lastDisplayMode, lastProfileDid);
+    }
+  });
+
+  // Watch the main content area for changes
+  const mainContent = document.querySelector('main') || document.body;
+  containerGuardObserver.observe(mainContent, {
+    childList: true,
+    subtree: true,
+  });
+}
+
+/**
+ * Wait for profile insertion point to appear (with timeout)
+ * Uses requestAnimationFrame for better performance
+ */
+async function waitForProfileInsertionPoint(maxWaitMs: number = 5000): Promise<HTMLElement | null> {
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+
+    const check = () => {
+      const element = findProfileInsertionPoint();
+      if (element) {
+        resolve(element);
+        return;
+      }
+
+      if (Date.now() - startTime < maxWaitMs) {
+        requestAnimationFrame(check);
+      } else {
+        resolve(null);
+      }
+    };
+
+    check();
+  });
+}
+
+/**
+ * Inject blocking info UI into the profile page
  */
 async function injectBlockingInfo(): Promise<void> {
   const handle = getProfileHandleFromUrl();
-  if (!handle) return;
+  if (!handle) {
+    return;
+  }
 
-  // Skip if already injected for this handle or in progress
-  if (handle === lastInjectedHandle || injectionInProgress) {
+  // Skip if another injection is in progress
+  if (injectionInProgress) {
+    console.log('[AskBeeves] Injection already in progress, skipping');
+    return;
+  }
+
+  // Check current state
+  const alreadyInjected = handle === lastInjectedHandle;
+  const containerExists = document.getElementById('askbeeves-blocking-container') !== null;
+
+  // Skip only if we've already successfully injected for this exact handle AND the container exists
+  if (alreadyInjected && containerExists) {
+    console.log('[AskBeeves] Already injected for', handle);
     return;
   }
 
   injectionInProgress = true;
+  console.log('[AskBeeves] Starting injection for', handle);
 
-  // Remove any existing injected elements
+  // Remove any existing injected elements (might be stale from previous profile)
   const existing = document.getElementById('askbeeves-blocking-container');
   if (existing) existing.remove();
 
-  // Wait for the "Followed by" element to appear (profile may still be loading)
-  const followedByElement = await waitForFollowedBy();
-  if (!followedByElement) {
-    console.log('[AskBeeves] No "Followed by" element found after waiting');
+  // Start profile resolution immediately (don't wait for DOM)
+  console.log('[AskBeeves] Resolving profile for:', handle);
+  const profilePromise = getProfile(handle);
+
+  // Wait for the insertion point to appear (profile may still be loading)
+  const insertionPoint = await waitForProfileInsertionPoint();
+  if (!insertionPoint) {
+    console.log('[AskBeeves] No profile insertion point found after waiting');
     injectionInProgress = false;
     return;
   }
 
-  // Resolve handle to DID
-  console.log('[AskBeeves] Resolving profile for:', handle);
-  const profile = await getProfile(handle);
+  // Wait for profile resolution
+  const profile = await profilePromise;
   if (!profile?.did) {
     console.log('[AskBeeves] Could not resolve profile DID for:', handle);
     injectionInProgress = false;
@@ -530,11 +863,30 @@ async function injectBlockingInfo(): Promise<void> {
   }
   console.log('[AskBeeves] Resolved DID:', profile.did);
 
+  // Show loading indicator immediately
+  const loadingContainer = document.createElement('div');
+  loadingContainer.id = 'askbeeves-blocking-container';
+  loadingContainer.style.cssText = `
+    margin-top: 8px;
+    font-size: 13px;
+    line-height: 18px;
+    color: rgb(66, 87, 108);
+    opacity: 0.7;
+  `;
+  loadingContainer.textContent = 'Loading block info...';
+
+  if (insertionPoint.nextSibling) {
+    insertionPoint.parentNode?.insertBefore(loadingContainer, insertionPoint.nextSibling);
+  } else {
+    insertionPoint.parentNode?.appendChild(loadingContainer);
+  }
+
   // Get blocking info from background script
   let response;
   try {
     if (!isExtensionContextValid()) {
       console.log('[AskBeeves] Extension context invalidated, skipping message');
+      loadingContainer.remove();
       injectionInProgress = false;
       return;
     }
@@ -544,12 +896,14 @@ async function injectBlockingInfo(): Promise<void> {
     } as Message);
   } catch (error) {
     console.log('[AskBeeves] Error sending message:', error);
+    loadingContainer.remove();
     injectionInProgress = false;
     return;
   }
 
   if (!response || !response.success || !response.blockingInfo) {
     console.log('[AskBeeves] Failed to get blocking info:', response?.error);
+    loadingContainer.remove();
     injectionInProgress = false;
     return;
   }
@@ -574,32 +928,33 @@ async function injectBlockingInfo(): Promise<void> {
 
   console.log('[AskBeeves] Display mode:', displayMode);
 
-  // Click handlers for modals
-  const onBlockedByClick = () => {
-    showFullListModal(
-      blockingInfo.blockedBy,
-      'Blocked by (users you follow who block this profile)'
-    );
-  };
+  // Store the data for potential re-injection if React removes our element
+  lastBlockingInfo = blockingInfo;
+  lastDisplayMode = displayMode;
+  lastProfileDid = profile.did;
 
-  const onBlockingClick = () => {
-    showFullListModal(
-      blockingInfo.blocking,
-      'Blocking (users you follow that this profile blocks)'
-    );
-  };
+  // Remove loading indicator
+  loadingContainer.remove();
 
-  // Create display based on mode
-  const container = displayMode === 'compact'
-    ? createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick)
-    : createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick);
-
-  // Insert after "Followed by" element
-  if (followedByElement.nextSibling) {
-    followedByElement.parentNode?.insertBefore(container, followedByElement.nextSibling);
-  } else {
-    followedByElement.parentNode?.appendChild(container);
+  // Find insertion point again (may have changed during async operations)
+  const currentInsertionPoint = findProfileInsertionPoint();
+  if (!currentInsertionPoint) {
+    console.log('[AskBeeves] Insertion point lost during async operations');
+    injectionInProgress = false;
+    return;
   }
+
+  // Remove any existing container (may have been re-added by guard)
+  const existingContainer = document.getElementById('askbeeves-blocking-container');
+  if (existingContainer) {
+    existingContainer.remove();
+  }
+
+  // Inject the container
+  injectContainer(currentInsertionPoint, blockingInfo, displayMode, profile.did);
+
+  // Start the container guard to re-inject if React removes it
+  startContainerGuard();
 
   lastInjectedHandle = handle;
   injectionInProgress = false;
@@ -623,22 +978,25 @@ function isExtensionContextValid(): boolean {
 function checkAndInjectIfNeeded(): void {
   const handle = getProfileHandleFromUrl();
 
-  // Clear lastInjectedHandle if we navigated away
+  // Clear state if we navigated away from a profile
   if (!handle) {
     lastInjectedHandle = null;
+    injectionInProgress = false;
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
     return;
   }
 
-  // Reset if we're on a different profile
-  if (handle !== lastInjectedHandle) {
-    // Short debounce - just enough to batch rapid DOM changes
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-    }
-    debounceTimer = setTimeout(() => {
-      injectBlockingInfo();
-    }, 100);
+  // Debounce to batch rapid DOM changes, then let injectBlockingInfo decide if work is needed
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
   }
+  debounceTimer = setTimeout(() => {
+    debounceTimer = null;
+    injectBlockingInfo();
+  }, 200);
 }
 
 /**
@@ -655,15 +1013,40 @@ function handleUrlChange(): void {
     console.log('[AskBeeves] URL changed:', lastUrl, '->', currentUrl);
     lastUrl = currentUrl;
 
-    // Reset state for new navigation
+    // Reset ALL state for new navigation
     lastInjectedHandle = null;
+    injectionInProgress = false;
+    lastBlockingInfo = null;
+    lastProfileDid = null;
+
+    // Stop the container guard
+    if (containerGuardObserver) {
+      containerGuardObserver.disconnect();
+      containerGuardObserver = null;
+    }
+
+    // Clear any pending debounce
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = null;
+    }
 
     // Remove existing container immediately on navigation
     const existing = document.getElementById('askbeeves-blocking-container');
-    if (existing) existing.remove();
+    if (existing) {
+      console.log('[AskBeeves] Removing stale container');
+      existing.remove();
+    }
 
-    // Trigger injection check
-    checkAndInjectIfNeeded();
+    // Check if we're now on a profile page
+    const handle = getProfileHandleFromUrl();
+    if (handle) {
+      console.log('[AskBeeves] Navigated to profile:', handle);
+      // Trigger injection after DOM settles
+      setTimeout(() => {
+        injectBlockingInfo();
+      }, 250);
+    }
   }
 }
 
@@ -675,11 +1058,17 @@ function observeNavigation(): void {
     currentObserver.disconnect();
   }
 
-  // MutationObserver for DOM changes
+  // MutationObserver for DOM changes - throttled to avoid excessive checks
+  let mutationTimeout: ReturnType<typeof setTimeout> | null = null;
   currentObserver = new MutationObserver(() => {
-    // Check for URL changes on every DOM mutation
-    handleUrlChange();
-    checkAndInjectIfNeeded();
+    // Throttle mutation checks
+    if (!mutationTimeout) {
+      mutationTimeout = setTimeout(() => {
+        mutationTimeout = null;
+        handleUrlChange();
+        checkAndInjectIfNeeded();
+      }, 100);
+    }
   });
 
   currentObserver.observe(document.documentElement, {
@@ -692,6 +1081,18 @@ function observeNavigation(): void {
     console.log('[AskBeeves] popstate event');
     handleUrlChange();
   });
+
+  // Listen for clicks on links (catches SPA navigation more reliably)
+  document.addEventListener('click', (e) => {
+    const target = e.target as HTMLElement;
+    const link = target.closest('a');
+    if (link?.href?.includes('/profile/')) {
+      // Delay to let the navigation happen first
+      setTimeout(() => {
+        handleUrlChange();
+      }, 100);
+    }
+  }, true);
 
   // Intercept History API for SPA navigation
   const originalPushState = history.pushState;

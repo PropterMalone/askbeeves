@@ -9,11 +9,13 @@ import {
   fetchWithRetry,
   sleep,
   chunk,
+  clearPdsCache,
 } from '../api.js';
 
 describe('API Module', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearPdsCache(); // Clear PDS cache between tests
 
     const store: Record<string, string> = {};
     const localStorageMock = {

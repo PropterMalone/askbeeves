@@ -104,6 +104,7 @@ export interface UserBlockBloomCache {
   handle: string;
   displayName?: string;
   avatar?: string;
+  pdsUrl?: string; // Cached PDS URL to avoid re-resolution
   bloomFilter: BloomFilterData; // Bloom filter for "might contain" checks
   blockCount: number; // Total number of blocks (for stats)
   lastSynced: number;
@@ -146,6 +147,7 @@ export interface PlcDocument {
 export type MessageType =
   | 'SET_AUTH'
   | 'GET_BLOCKING_INFO'
+  | 'GET_VERIFIED_BLOCKERS'
   | 'FETCH_PROFILE_BLOCKS'
   | 'TRIGGER_SYNC'
   | 'GET_SYNC_STATUS'
@@ -156,6 +158,7 @@ export interface Message {
   profileDid?: string;
   handle?: string;
   auth?: BskySession;
+  candidateDids?: string[]; // For GET_VERIFIED_BLOCKERS
 }
 
 export interface MessageResponse {
@@ -164,6 +167,7 @@ export interface MessageResponse {
   blockingInfo?: BlockingInfo;
   blocks?: string[];
   syncStatus?: SyncStatus;
+  verifiedBlockers?: FollowedUser[]; // For GET_VERIFIED_BLOCKERS response
 }
 
 // Display mode for blocking info

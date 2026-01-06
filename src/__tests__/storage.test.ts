@@ -20,6 +20,7 @@ vi.mock('../bloom.js', () => ({
     // This is set up in tests by adding a mockBlocks property
     return filter.mockBlocks?.includes(did) ?? false;
   }),
+  estimateFalsePositiveRate: vi.fn(() => 0.001), // Mock 0.1% FP rate
 }));
 
 type StorageResult = Record<string, unknown>;

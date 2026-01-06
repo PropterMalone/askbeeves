@@ -13,7 +13,7 @@ import {
   STORAGE_KEYS,
   BskySession,
 } from './types.js';
-import { bloomFilterMightContain } from './bloom.js';
+import { bloomFilterMightContain, estimateFalsePositiveRate } from './bloom.js';
 
 /**
  * Get cached block data from storage
@@ -106,22 +106,57 @@ export async function storeAuth(auth: BskySession): Promise<void> {
 export async function getCandidateBlockers(profileDid: string): Promise<FollowedUser[]> {
   const cache = await getBlockCache();
   if (!cache) {
+    console.log('[AskBeeves Storage] getCandidateBlockers: no cache');
     return [];
   }
 
   const candidates: FollowedUser[] = [];
+  let usersWithBloomFilters = 0;
+  let totalBlockCount = 0;
+  let minBlocks = Infinity;
+  let maxBlocks = 0;
+  let totalFpRate = 0;
+  let saturatedFilters = 0;
 
   for (const user of cache.followedUsers) {
     const userCache = cache.userBlockCaches[user.did];
-    if (userCache?.bloomFilter && bloomFilterMightContain(userCache.bloomFilter, profileDid)) {
-      candidates.push({
-        did: user.did,
-        handle: userCache.handle || user.handle,
-        displayName: userCache.displayName || user.displayName,
-        avatar: userCache.avatar || user.avatar,
-      });
+    if (userCache?.bloomFilter) {
+      usersWithBloomFilters++;
+      totalBlockCount += userCache.blockCount || 0;
+      minBlocks = Math.min(minBlocks, userCache.blockCount || 0);
+      maxBlocks = Math.max(maxBlocks, userCache.blockCount || 0);
+
+      // Check estimated FP rate
+      const fpRate = estimateFalsePositiveRate(userCache.bloomFilter);
+      totalFpRate += fpRate;
+      if (fpRate > 0.5) {
+        saturatedFilters++;
+      }
+
+      if (bloomFilterMightContain(userCache.bloomFilter, profileDid)) {
+        candidates.push({
+          did: user.did,
+          handle: userCache.handle || user.handle,
+          displayName: userCache.displayName || user.displayName,
+          avatar: userCache.avatar || user.avatar,
+        });
+      }
     }
   }
+
+  const avgBlocks = usersWithBloomFilters > 0 ? Math.round(totalBlockCount / usersWithBloomFilters) : 0;
+  const avgFpRate = usersWithBloomFilters > 0 ? (totalFpRate / usersWithBloomFilters * 100).toFixed(1) : '0';
+  const candidateRate = usersWithBloomFilters > 0 ? ((candidates.length / usersWithBloomFilters) * 100).toFixed(1) : '0';
+
+  console.log(
+    `[AskBeeves Storage] getCandidateBlockers: checked ${usersWithBloomFilters} bloom filters, found ${candidates.length} candidates (${candidateRate}%) for ${profileDid}`
+  );
+  console.log(
+    `[AskBeeves Storage] Block stats: avg=${avgBlocks}, min=${minBlocks === Infinity ? 0 : minBlocks}, max=${maxBlocks}`
+  );
+  console.log(
+    `[AskBeeves Storage] Bloom filter stats: avg FP rate=${avgFpRate}%, saturated (>50% FP)=${saturatedFilters}`
+  );
 
   return candidates;
 }

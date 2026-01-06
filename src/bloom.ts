@@ -8,9 +8,10 @@
  * This allows storing block lists in ~3% of the space of full DID arrays.
  */
 
-// Default parameters for ~1% false positive rate
-const DEFAULT_BITS_PER_ELEMENT = 10;
-const DEFAULT_NUM_HASHES = 7;
+// Default parameters for ~0.1% false positive rate (more conservative)
+// Increased from 10 bits/7 hashes to handle DID similarity better
+const DEFAULT_BITS_PER_ELEMENT = 15;
+const DEFAULT_NUM_HASHES = 10;
 
 export interface BloomFilterData {
   // Base64-encoded bit array
@@ -24,31 +25,53 @@ export interface BloomFilterData {
 }
 
 /**
- * Simple hash function using FNV-1a algorithm
- * Returns a 32-bit hash
+ * MurmurHash3-like hash function for better distribution
+ * Returns a 32-bit unsigned hash
  */
-function fnv1a(str: string, seed: number = 0): number {
-  let hash = 2166136261 ^ seed;
+function murmurHash3(str: string, seed: number = 0): number {
+  let h1 = seed >>> 0;
+  const c1 = 0xcc9e2d51;
+  const c2 = 0x1b873593;
+
   for (let i = 0; i < str.length; i++) {
-    hash ^= str.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
+    let k1 = str.charCodeAt(i);
+    k1 = Math.imul(k1, c1);
+    k1 = (k1 << 15) | (k1 >>> 17);
+    k1 = Math.imul(k1, c2);
+
+    h1 ^= k1;
+    h1 = (h1 << 13) | (h1 >>> 19);
+    h1 = Math.imul(h1, 5) + 0xe6546b64;
   }
-  return hash >>> 0; // Convert to unsigned 32-bit
+
+  // Finalization
+  h1 ^= str.length;
+  h1 ^= h1 >>> 16;
+  h1 = Math.imul(h1, 0x85ebca6b);
+  h1 ^= h1 >>> 13;
+  h1 = Math.imul(h1, 0xc2b2ae35);
+  h1 ^= h1 >>> 16;
+
+  return h1 >>> 0;
 }
 
 /**
- * Generate multiple hash values using double hashing technique
- * h(i) = h1 + i * h2
+ * Generate multiple independent hash values using enhanced double hashing
+ * Uses two different seeds and combines them for better distribution
  */
 function getHashValues(item: string, numHashes: number, size: number): number[] {
-  const h1 = fnv1a(item, 0);
-  const h2 = fnv1a(item, h1);
+  // Use two completely independent hash values with different seeds
+  const h1 = murmurHash3(item, 0);
+  const h2 = murmurHash3(item, 0x9e3779b9); // Golden ratio seed
 
   const hashes: number[] = [];
   for (let i = 0; i < numHashes; i++) {
-    // Combine hashes and mod by size
-    const hash = (h1 + i * h2) % size;
-    hashes.push(Math.abs(hash));
+    // Kirsch-Mitzenmacher optimization: g(i) = h1 + i*h2 + i^2
+    // The i^2 term helps break up patterns
+    const combined = h1 + i * h2 + i * i;
+    // Use unsigned modulo to ensure positive result
+    const hash = ((combined % size) + size) % size;
+    hashes.push(hash);
   }
   return hashes;
 }

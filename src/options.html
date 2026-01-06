@@ -116,6 +116,45 @@
       font-size: 12px;
       color: #9ca3af;
     }
+
+    .sync-status {
+      padding: 12px;
+      background: #f9fafb;
+      border-radius: 8px;
+      font-size: 13px;
+      line-height: 1.6;
+      margin-bottom: 12px;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .btn {
+      padding: 8px 16px;
+      border: none;
+      border-radius: 6px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      background: #1083fe;
+      color: white;
+      transition: background-color 0.2s;
+    }
+
+    .btn:hover {
+      background: #0969da;
+    }
+
+    .btn-secondary {
+      background: #e5e7eb;
+      color: #374151;
+    }
+
+    .btn-secondary:hover {
+      background: #d1d5db;
+    }
   </style>
 </head>
 <body>
@@ -146,6 +185,15 @@
           <div class="option-preview">Shows avatars and "Blocked by Alice, Bob, and 1 other"</div>
         </div>
       </label>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Sync Status</div>
+      <div id="sync-status" class="sync-status">Loading...</div>
+      <div class="button-row">
+        <button id="refresh-sync-btn" class="btn">Refresh Sync</button>
+        <button id="clear-cache-btn" class="btn btn-secondary">Clear Cache</button>
+      </div>
     </div>
 
     <div class="footer">
