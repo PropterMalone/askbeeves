@@ -35,7 +35,9 @@ if (!fs.existsSync(distIconsDir)) {
 if (fs.existsSync(iconsDir)) {
   fs.readdirSync(iconsDir).forEach((file) => {
     if (file.endsWith('.png')) {
-      fs.copyFileSync(path.join(iconsDir, file), path.join(distIconsDir, file));
+      // Use path.basename to prevent path traversal attacks
+      const safeFilename = path.basename(file);
+      fs.copyFileSync(path.join(iconsDir, file), path.join(distIconsDir, safeFilename));
     }
   });
 }

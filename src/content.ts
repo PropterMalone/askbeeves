@@ -23,6 +23,17 @@ let cachedAvatarStyle: { size: string; overlap: string } | null = null;
 const DEFAULT_AVATAR = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
 
 /**
+ * Validate and sanitize avatar URL to prevent XSS via javascript: URIs
+ */
+function getSafeAvatarUrl(url: string | undefined): string {
+  if (!url) return DEFAULT_AVATAR;
+  if (url.startsWith('https://') || url.startsWith('http://') || url.startsWith('data:image/')) {
+    return url;
+  }
+  return DEFAULT_AVATAR;
+}
+
+/**
  * Extract profile handle from the URL
  */
 function getProfileHandleFromUrl(): string | null {
@@ -201,7 +212,7 @@ function createAvatarRow(
   for (let i = 0; i < count; i++) {
     const user = sampledUsers[i];
     const avatar = document.createElement('img');
-    avatar.src = user.avatar || DEFAULT_AVATAR;
+    avatar.src = getSafeAvatarUrl(user.avatar);
     avatar.alt = user.displayName || user.handle;
     avatar.title = user.displayName || `@${user.handle}`;
     avatar.style.cssText = `width:${size};height:${size};border-radius:50%;object-fit:cover;margin-left:${i > 0 ? overlap : '0'};position:relative;z-index:${3 - i};box-shadow:0 0 0 2px white`;
@@ -243,7 +254,7 @@ function showFullListModal(
     item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb';
 
     const avatar = document.createElement('img');
-    avatar.src = user.avatar || DEFAULT_AVATAR;
+    avatar.src = getSafeAvatarUrl(user.avatar);
     avatar.alt = user.displayName || user.handle;
     avatar.style.cssText = 'width:32px;height:32px;border-radius:50%;object-fit:cover';
     avatar.onerror = () => { avatar.src = DEFAULT_AVATAR; };
