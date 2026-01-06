@@ -113,7 +113,8 @@ function chunk(array, size) {
 var STORAGE_KEYS = {
   BLOCK_CACHE: "blockCache",
   SYNC_STATUS: "syncStatus",
-  AUTH_TOKEN: "authToken"
+  AUTH_TOKEN: "authToken",
+  SETTINGS: "settings"
 };
 
 // src/bloom.ts

@@ -40,6 +40,12 @@ if (fs.existsSync(iconsDir)) {
   });
 }
 
+// Copy options.html
+const optionsHtmlPath = path.join(__dirname, '..', 'src', 'options.html');
+if (fs.existsSync(optionsHtmlPath)) {
+  fs.copyFileSync(optionsHtmlPath, path.join(distDir, 'options.html'));
+}
+
 console.log('Assets copied to dist/');
 
 export function copyAssets() {

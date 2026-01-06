@@ -1,8 +1,12 @@
 // src/types.ts
+var DEFAULT_SETTINGS = {
+  displayMode: "compact"
+};
 var STORAGE_KEYS = {
   BLOCK_CACHE: "blockCache",
   SYNC_STATUS: "syncStatus",
-  AUTH_TOKEN: "authToken"
+  AUTH_TOKEN: "authToken",
+  SETTINGS: "settings"
 };
 
 // src/bloom.ts
@@ -143,6 +147,14 @@ async function lookupBlockingInfo(profileDid, verifiedBlockers, profileBlocks) {
   }
   return { blockedBy, blocking };
 }
+async function getSettings() {
+  const result = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+  const data = result[STORAGE_KEYS.SETTINGS];
+  return data || DEFAULT_SETTINGS;
+}
+async function saveSettings(settings) {
+  await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: settings });
+}
 async function clearAllData() {
   await chrome.storage.local.clear();
 }
@@ -151,10 +163,12 @@ export {
   createEmptyCache,
   getBlockCache,
   getCandidateBlockers,
+  getSettings,
   getStoredAuth,
   getSyncStatus,
   lookupBlockingInfo,
   saveBlockCache,
+  saveSettings,
   storeAuth,
   updateSyncStatus,
   updateUserBlockCache

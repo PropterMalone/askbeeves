@@ -8,6 +8,8 @@ import {
   BlockingInfo,
   FollowedUser,
   UserBlockBloomCache,
+  UserSettings,
+  DEFAULT_SETTINGS,
   STORAGE_KEYS,
   BskySession,
 } from './types.js';
@@ -172,6 +174,22 @@ export async function lookupBlockingInfo(
   }
 
   return { blockedBy, blocking };
+}
+
+/**
+ * Get user settings
+ */
+export async function getSettings(): Promise<UserSettings> {
+  const result = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+  const data = result[STORAGE_KEYS.SETTINGS] as UserSettings | undefined;
+  return data || DEFAULT_SETTINGS;
+}
+
+/**
+ * Save user settings
+ */
+export async function saveSettings(settings: UserSettings): Promise<void> {
+  await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: settings });
 }
 
 /**
