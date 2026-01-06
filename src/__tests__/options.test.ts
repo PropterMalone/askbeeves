@@ -10,7 +10,6 @@ import { getSettings, saveSettings } from '../storage.js';
 
 describe('Options Page', () => {
   let mockSendMessage: ReturnType<typeof vi.fn>;
-  let mockAddEventListener: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
