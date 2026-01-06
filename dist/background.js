@@ -116,6 +116,84 @@ var STORAGE_KEYS = {
   AUTH_TOKEN: "authToken"
 };
 
+// src/bloom.ts
+var DEFAULT_BITS_PER_ELEMENT = 10;
+var DEFAULT_NUM_HASHES = 7;
+function fnv1a(str, seed = 0) {
+  let hash = 2166136261 ^ seed;
+  for (let i = 0; i < str.length; i++) {
+    hash ^= str.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+function getHashValues(item, numHashes, size) {
+  const h1 = fnv1a(item, 0);
+  const h2 = fnv1a(item, h1);
+  const hashes = [];
+  for (let i = 0; i < numHashes; i++) {
+    const hash = (h1 + i * h2) % size;
+    hashes.push(Math.abs(hash));
+  }
+  return hashes;
+}
+function createBloomFilter(expectedElements, bitsPerElement = DEFAULT_BITS_PER_ELEMENT, numHashes = DEFAULT_NUM_HASHES) {
+  const size = Math.max(64, Math.ceil(expectedElements * bitsPerElement));
+  const byteSize = Math.ceil(size / 8);
+  const bytes = new Uint8Array(byteSize);
+  return {
+    bits: uint8ArrayToBase64(bytes),
+    size,
+    numHashes,
+    count: 0
+  };
+}
+function bloomFilterFromArray(items, bitsPerElement = DEFAULT_BITS_PER_ELEMENT, numHashes = DEFAULT_NUM_HASHES) {
+  const filter = createBloomFilter(items.length, bitsPerElement, numHashes);
+  for (const item of items) {
+    bloomFilterAdd(filter, item);
+  }
+  return filter;
+}
+function bloomFilterAdd(filter, item) {
+  const bytes = base64ToUint8Array(filter.bits);
+  const hashes = getHashValues(item, filter.numHashes, filter.size);
+  for (const hash of hashes) {
+    const byteIndex = Math.floor(hash / 8);
+    const bitIndex = hash % 8;
+    bytes[byteIndex] |= 1 << bitIndex;
+  }
+  filter.bits = uint8ArrayToBase64(bytes);
+  filter.count++;
+}
+function bloomFilterMightContain(filter, item) {
+  const bytes = base64ToUint8Array(filter.bits);
+  const hashes = getHashValues(item, filter.numHashes, filter.size);
+  for (const hash of hashes) {
+    const byteIndex = Math.floor(hash / 8);
+    const bitIndex = hash % 8;
+    if ((bytes[byteIndex] & 1 << bitIndex) === 0) {
+      return false;
+    }
+  }
+  return true;
+}
+function uint8ArrayToBase64(bytes) {
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
+}
+function base64ToUint8Array(base64) {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
+}
+
 // src/storage.ts
 async function getBlockCache() {
   const result = await chrome.storage.local.get(STORAGE_KEYS.BLOCK_CACHE);
@@ -159,7 +237,26 @@ async function getStoredAuth() {
 async function storeAuth(auth) {
   await chrome.storage.local.set({ [STORAGE_KEYS.AUTH_TOKEN]: auth });
 }
-async function lookupBlockingInfo(profileDid, profileBlocks) {
+async function getCandidateBlockers(profileDid) {
+  const cache = await getBlockCache();
+  if (!cache) {
+    return [];
+  }
+  const candidates = [];
+  for (const user of cache.followedUsers) {
+    const userCache = cache.userBlockCaches[user.did];
+    if (userCache?.bloomFilter && bloomFilterMightContain(userCache.bloomFilter, profileDid)) {
+      candidates.push({
+        did: user.did,
+        handle: userCache.handle || user.handle,
+        displayName: userCache.displayName || user.displayName,
+        avatar: userCache.avatar || user.avatar
+      });
+    }
+  }
+  return candidates;
+}
+async function lookupBlockingInfo(profileDid, verifiedBlockers, profileBlocks) {
   const cache = await getBlockCache();
   if (!cache) {
     return { blockedBy: [], blocking: [] };
@@ -167,19 +264,19 @@ async function lookupBlockingInfo(profileDid, profileBlocks) {
   const blockedBy = [];
   const blocking = [];
   const followedDids = new Set(cache.followedUsers.map((u) => u.did));
+  const verifiedSet = new Set(verifiedBlockers);
   for (const user of cache.followedUsers) {
-    const userBlocks = cache.userBlockCaches[user.did];
-    if (userBlocks && userBlocks.blocks.includes(profileDid)) {
+    if (verifiedSet.has(user.did)) {
+      const userCache = cache.userBlockCaches[user.did];
       blockedBy.push({
         did: user.did,
-        handle: userBlocks.handle || user.handle,
-        displayName: userBlocks.displayName || user.displayName,
-        avatar: userBlocks.avatar || user.avatar
+        handle: userCache?.handle || user.handle,
+        displayName: userCache?.displayName || user.displayName,
+        avatar: userCache?.avatar || user.avatar
       });
     }
   }
-  const blocksToCheck = profileBlocks || cache.userBlockCaches[profileDid]?.blocks || [];
-  for (const blockedDid of blocksToCheck) {
+  for (const blockedDid of profileBlocks) {
     if (followedDids.has(blockedDid)) {
       const user = cache.followedUsers.find((u) => u.did === blockedDid);
       if (user) {
@@ -201,10 +298,10 @@ function estimateObjectSize(obj) {
   return new Blob([JSON.stringify(obj)]).size;
 }
 function pruneCache(cache) {
-  const usersWithBlockCounts = Object.entries(cache.userBlockCaches).map(([did, data]) => ({ did, blockCount: data.blocks.length })).sort((a, b) => b.blockCount - a.blockCount);
+  const usersByAge = Object.entries(cache.userBlockCaches).map(([did, data]) => ({ did, lastSynced: data.lastSynced })).sort((a, b) => a.lastSynced - b.lastSynced);
   let currentSize = estimateObjectSize(cache);
   let prunedCount = 0;
-  for (const { did } of usersWithBlockCounts) {
+  for (const { did } of usersByAge) {
     if (currentSize <= MAX_CACHE_SIZE_BYTES) break;
     const removedSize = estimateObjectSize(cache.userBlockCaches[did]);
     delete cache.userBlockCaches[did];
@@ -286,12 +383,14 @@ async function performFullSync() {
             blocks = [];
           }
           if (blocks.length > 0) {
+            const bloomFilter = bloomFilterFromArray(blocks);
             const userCache = {
               did: user.did,
               handle: user.handle,
               displayName: user.displayName,
               avatar: user.avatar,
-              blocks,
+              bloomFilter,
+              blockCount: blocks.length,
               lastSynced: Date.now()
             };
             cache.userBlockCaches[user.did] = userCache;
@@ -302,7 +401,7 @@ async function performFullSync() {
             totalFollows: follows.length
           });
           console.log(
-            `[AskBeeves BG] Synced blocks for ${user.handle} (${syncedCount}/${follows.length})${blocks.length > 0 ? ` - ${blocks.length} blocks` : ""}`
+            `[AskBeeves BG] Synced blocks for ${user.handle} (${syncedCount}/${follows.length})${blocks.length > 0 ? ` - ${blocks.length} blocks (bloom)` : ""}`
           );
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : "Unknown error";
@@ -399,15 +498,28 @@ async function handleSyncMessage(message, sendResponse) {
         const cacheCount = cache ? Object.keys(cache.userBlockCaches).length : 0;
         console.log(
           "[AskBeeves BG] Cache state:",
-          cache ? `${cache.followedUsers.length} follows, ${cacheCount} block caches (users with blocks)` : "empty"
+          cache ? `${cache.followedUsers.length} follows, ${cacheCount} bloom filters` : "empty"
         );
-        if (cache && cacheCount > 0) {
-          const sampleBlockers = Object.values(cache.userBlockCaches).slice(0, 3);
-          for (const blocker of sampleBlockers) {
-            console.log(
-              `[AskBeeves BG] Sample blocker: ${blocker.handle} has ${blocker.blocks.length} blocks`
-            );
-          }
+        const candidates = await getCandidateBlockers(message.profileDid);
+        console.log(`[AskBeeves BG] Bloom filter candidates: ${candidates.length} users might block this profile`);
+        const verifiedBlockers = [];
+        if (candidates.length > 0) {
+          console.log(`[AskBeeves BG] Verifying ${candidates.length} candidates...`);
+          const verifyPromises = candidates.map(async (candidate) => {
+            try {
+              const blocks = await getUserBlocks(candidate.did);
+              if (blocks.includes(message.profileDid)) {
+                verifiedBlockers.push(candidate.did);
+                console.log(`[AskBeeves BG] Verified: ${candidate.handle} blocks this profile`);
+              } else {
+                console.log(`[AskBeeves BG] False positive: ${candidate.handle} doesn't actually block`);
+              }
+            } catch (error) {
+              console.log(`[AskBeeves BG] Could not verify ${candidate.handle}:`, error);
+            }
+          });
+          await Promise.all(verifyPromises);
+          console.log(`[AskBeeves BG] Verified ${verifiedBlockers.length}/${candidates.length} actual blockers`);
         }
         let profileBlocks = [];
         try {
@@ -416,7 +528,7 @@ async function handleSyncMessage(message, sendResponse) {
         } catch (error) {
           console.log("[AskBeeves BG] Could not fetch profile blocks:", error);
         }
-        const blockingInfo = await lookupBlockingInfo(message.profileDid, profileBlocks);
+        const blockingInfo = await lookupBlockingInfo(message.profileDid, verifiedBlockers, profileBlocks);
         console.log(
           "[AskBeeves BG] Blocking info for",
           message.profileDid,
@@ -426,23 +538,6 @@ async function handleSyncMessage(message, sendResponse) {
           blockingInfo.blocking.length,
           "blocking"
         );
-        if (blockingInfo.blockedBy.length === 0 && cacheCount > 0) {
-          console.log(
-            "[AskBeeves BG] No blockedBy found. Checking if anyone blocks this DID..."
-          );
-          if (cache) {
-            let foundAny = false;
-            for (const [did, userCache] of Object.entries(cache.userBlockCaches)) {
-              if (userCache.blocks.includes(message.profileDid)) {
-                console.log(`[AskBeeves BG] Found: ${userCache.handle} blocks this profile`);
-                foundAny = true;
-              }
-            }
-            if (!foundAny) {
-              console.log("[AskBeeves BG] No one in cache blocks this profile DID");
-            }
-          }
-        }
         sendResponse({ success: true, blockingInfo });
         break;
       }

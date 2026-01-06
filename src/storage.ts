@@ -7,10 +7,11 @@ import {
   SyncStatus,
   BlockingInfo,
   FollowedUser,
-  UserBlockCache,
+  UserBlockBloomCache,
   STORAGE_KEYS,
   BskySession,
 } from './types.js';
+import { bloomFilterMightContain } from './bloom.js';
 
 /**
  * Get cached block data from storage
@@ -41,9 +42,9 @@ export function createEmptyCache(currentUserDid: string): BlockCacheData {
 }
 
 /**
- * Update a single user's block cache
+ * Update a single user's block cache (bloom filter version)
  */
-export async function updateUserBlockCache(userCache: UserBlockCache): Promise<void> {
+export async function updateUserBlockCache(userCache: UserBlockBloomCache): Promise<void> {
   const cache = await getBlockCache();
   if (!cache) return;
 
@@ -96,14 +97,44 @@ export async function storeAuth(auth: BskySession): Promise<void> {
 }
 
 /**
+ * Get candidate blockers using bloom filters (may include false positives)
+ * Returns DIDs of followed users whose bloom filter indicates they MIGHT block the profile
+ * These need to be verified by fetching actual block lists
+ */
+export async function getCandidateBlockers(profileDid: string): Promise<FollowedUser[]> {
+  const cache = await getBlockCache();
+  if (!cache) {
+    return [];
+  }
+
+  const candidates: FollowedUser[] = [];
+
+  for (const user of cache.followedUsers) {
+    const userCache = cache.userBlockCaches[user.did];
+    if (userCache?.bloomFilter && bloomFilterMightContain(userCache.bloomFilter, profileDid)) {
+      candidates.push({
+        did: user.did,
+        handle: userCache.handle || user.handle,
+        displayName: userCache.displayName || user.displayName,
+        avatar: userCache.avatar || user.avatar,
+      });
+    }
+  }
+
+  return candidates;
+}
+
+/**
  * Look up blocking info for a specific profile DID
  * Returns users you follow who block this profile, and users you follow that this profile blocks
  * @param profileDid - The DID of the profile being viewed
- * @param profileBlocks - Optional pre-fetched blocks for this profile (for "blocking" relationship)
+ * @param verifiedBlockers - DIDs of users verified to actually block this profile (from API fetch)
+ * @param profileBlocks - Pre-fetched blocks for this profile (for "blocking" relationship)
  */
 export async function lookupBlockingInfo(
   profileDid: string,
-  profileBlocks?: string[]
+  verifiedBlockers: string[],
+  profileBlocks: string[]
 ): Promise<BlockingInfo> {
   const cache = await getBlockCache();
   if (!cache) {
@@ -116,24 +147,22 @@ export async function lookupBlockingInfo(
   // Build a set of followed DIDs for quick lookup
   const followedDids = new Set(cache.followedUsers.map((u) => u.did));
 
-  // Find users you follow who block this profile
+  // Convert verified blockers to FollowedUser objects
+  const verifiedSet = new Set(verifiedBlockers);
   for (const user of cache.followedUsers) {
-    const userBlocks = cache.userBlockCaches[user.did];
-    if (userBlocks && userBlocks.blocks.includes(profileDid)) {
-      // Use avatar from cache if available (more up-to-date)
+    if (verifiedSet.has(user.did)) {
+      const userCache = cache.userBlockCaches[user.did];
       blockedBy.push({
         did: user.did,
-        handle: userBlocks.handle || user.handle,
-        displayName: userBlocks.displayName || user.displayName,
-        avatar: userBlocks.avatar || user.avatar,
+        handle: userCache?.handle || user.handle,
+        displayName: userCache?.displayName || user.displayName,
+        avatar: userCache?.avatar || user.avatar,
       });
     }
   }
 
   // Find users you follow that this profile blocks
-  // Use provided profileBlocks if available, otherwise check cache
-  const blocksToCheck = profileBlocks || cache.userBlockCaches[profileDid]?.blocks || [];
-  for (const blockedDid of blocksToCheck) {
+  for (const blockedDid of profileBlocks) {
     if (followedDids.has(blockedDid)) {
       const user = cache.followedUsers.find((u) => u.did === blockedDid);
       if (user) {

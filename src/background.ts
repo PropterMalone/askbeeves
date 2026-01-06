@@ -1,6 +1,8 @@
 /**
  * AskBeeves - Service worker background script
  * Handles periodic sync, message processing, and block list caching
+ *
+ * Uses bloom filters for space-efficient storage with on-demand verification
  */
 
 import { getAllFollows, getUserBlocks, chunk, sleep } from './api.js';
@@ -11,10 +13,12 @@ import {
   getStoredAuth,
   storeAuth,
   lookupBlockingInfo,
+  getCandidateBlockers,
   updateSyncStatus,
   getSyncStatus,
 } from './storage.js';
-import { Message, MessageResponse, UserBlockCache } from './types.js';
+import { bloomFilterFromArray } from './bloom.js';
+import { Message, MessageResponse, UserBlockBloomCache } from './types.js';
 
 const ALARM_NAME = 'performFullSync';
 const SYNC_INTERVAL_MINUTES = 60;
@@ -31,25 +35,25 @@ function estimateObjectSize(obj: unknown): number {
 }
 
 /**
- * Prune cache to fit within size limit by removing users with largest block lists first
- * (those with huge block lists contribute disproportionately to storage)
+ * Prune cache to fit within size limit by removing oldest entries first
+ * (with bloom filters, all entries are roughly similar size)
  */
 function pruneCache(cache: {
   followedUsers: Array<{ did: string; handle: string; displayName?: string; avatar?: string }>;
-  userBlockCaches: Record<string, UserBlockCache>;
+  userBlockCaches: Record<string, UserBlockBloomCache>;
   lastFullSync: number;
   currentUserDid: string;
 }): void {
-  // Get users sorted by block list size (largest first)
-  const usersWithBlockCounts = Object.entries(cache.userBlockCaches)
-    .map(([did, data]) => ({ did, blockCount: data.blocks.length }))
-    .sort((a, b) => b.blockCount - a.blockCount);
+  // Get users sorted by lastSynced (oldest first)
+  const usersByAge = Object.entries(cache.userBlockCaches)
+    .map(([did, data]) => ({ did, lastSynced: data.lastSynced }))
+    .sort((a, b) => a.lastSynced - b.lastSynced);
 
   let currentSize = estimateObjectSize(cache);
   let prunedCount = 0;
 
-  // Remove users with largest block lists until we're under the limit
-  for (const { did } of usersWithBlockCounts) {
+  // Remove oldest entries until we're under the limit
+  for (const { did } of usersByAge) {
     if (currentSize <= MAX_CACHE_SIZE_BYTES) break;
 
     const removedSize = estimateObjectSize(cache.userBlockCaches[did]);
@@ -68,7 +72,7 @@ function pruneCache(cache: {
  */
 async function safeSaveBlockCache(cache: {
   followedUsers: Array<{ did: string; handle: string; displayName?: string; avatar?: string }>;
-  userBlockCaches: Record<string, UserBlockCache>;
+  userBlockCaches: Record<string, UserBlockBloomCache>;
   lastFullSync: number;
   currentUserDid: string;
 }): Promise<boolean> {
@@ -167,12 +171,16 @@ async function performFullSync(): Promise<void> {
 
           // Only store if user has blocks (saves space - most users have 0 blocks)
           if (blocks.length > 0) {
-            const userCache: UserBlockCache = {
+            // Create bloom filter instead of storing full block list
+            const bloomFilter = bloomFilterFromArray(blocks);
+
+            const userCache: UserBlockBloomCache = {
               did: user.did,
               handle: user.handle,
               displayName: user.displayName,
               avatar: user.avatar,
-              blocks,
+              bloomFilter,
+              blockCount: blocks.length,
               lastSynced: Date.now(),
             };
 
@@ -187,7 +195,7 @@ async function performFullSync(): Promise<void> {
           });
 
           console.log(
-            `[AskBeeves BG] Synced blocks for ${user.handle} (${syncedCount}/${follows.length})${blocks.length > 0 ? ` - ${blocks.length} blocks` : ''}`
+            `[AskBeeves BG] Synced blocks for ${user.handle} (${syncedCount}/${follows.length})${blocks.length > 0 ? ` - ${blocks.length} blocks (bloom)` : ''}`
           );
         } catch (error) {
           const errorMsg = error instanceof Error ? error.message : 'Unknown error';
@@ -323,21 +331,40 @@ async function handleSyncMessage(
         console.log(
           '[AskBeeves BG] Cache state:',
           cache
-            ? `${cache.followedUsers.length} follows, ${cacheCount} block caches (users with blocks)`
+            ? `${cache.followedUsers.length} follows, ${cacheCount} bloom filters`
             : 'empty'
         );
 
-        // Debug: show a few users who have blocks cached
-        if (cache && cacheCount > 0) {
-          const sampleBlockers = Object.values(cache.userBlockCaches).slice(0, 3);
-          for (const blocker of sampleBlockers) {
-            console.log(
-              `[AskBeeves BG] Sample blocker: ${blocker.handle} has ${blocker.blocks.length} blocks`
-            );
-          }
+        // Step 1: Get candidate blockers from bloom filters (may have false positives)
+        const candidates = await getCandidateBlockers(message.profileDid);
+        console.log(`[AskBeeves BG] Bloom filter candidates: ${candidates.length} users might block this profile`);
+
+        // Step 2: Verify candidates by fetching their actual block lists
+        // This eliminates false positives from the bloom filter
+        const verifiedBlockers: string[] = [];
+        if (candidates.length > 0) {
+          console.log(`[AskBeeves BG] Verifying ${candidates.length} candidates...`);
+
+          // Fetch blocks in parallel for all candidates (typically small number)
+          const verifyPromises = candidates.map(async (candidate) => {
+            try {
+              const blocks = await getUserBlocks(candidate.did);
+              if (blocks.includes(message.profileDid!)) {
+                verifiedBlockers.push(candidate.did);
+                console.log(`[AskBeeves BG] Verified: ${candidate.handle} blocks this profile`);
+              } else {
+                console.log(`[AskBeeves BG] False positive: ${candidate.handle} doesn't actually block`);
+              }
+            } catch (error) {
+              console.log(`[AskBeeves BG] Could not verify ${candidate.handle}:`, error);
+            }
+          });
+
+          await Promise.all(verifyPromises);
+          console.log(`[AskBeeves BG] Verified ${verifiedBlockers.length}/${candidates.length} actual blockers`);
         }
 
-        // Fetch the viewed profile's blocks on-demand for "blocking" relationship
+        // Step 3: Fetch the viewed profile's blocks for "blocking" relationship
         let profileBlocks: string[] = [];
         try {
           profileBlocks = await getUserBlocks(message.profileDid);
@@ -346,7 +373,8 @@ async function handleSyncMessage(
           console.log('[AskBeeves BG] Could not fetch profile blocks:', error);
         }
 
-        const blockingInfo = await lookupBlockingInfo(message.profileDid, profileBlocks);
+        // Step 4: Build final blocking info with verified data
+        const blockingInfo = await lookupBlockingInfo(message.profileDid, verifiedBlockers, profileBlocks);
         console.log(
           '[AskBeeves BG] Blocking info for',
           message.profileDid,
@@ -356,26 +384,6 @@ async function handleSyncMessage(
           blockingInfo.blocking.length,
           'blocking'
         );
-
-        // Debug: if blockedBy is empty but we have caches, explain why
-        if (blockingInfo.blockedBy.length === 0 && cacheCount > 0) {
-          console.log(
-            '[AskBeeves BG] No blockedBy found. Checking if anyone blocks this DID...'
-          );
-          // Check if any cached user blocks this profile
-          if (cache) {
-            let foundAny = false;
-            for (const [did, userCache] of Object.entries(cache.userBlockCaches)) {
-              if (userCache.blocks.includes(message.profileDid)) {
-                console.log(`[AskBeeves BG] Found: ${userCache.handle} blocks this profile`);
-                foundAny = true;
-              }
-            }
-            if (!foundAny) {
-              console.log('[AskBeeves BG] No one in cache blocks this profile DID');
-            }
-          }
-        }
 
         sendResponse({ success: true, blockingInfo });
         break;
