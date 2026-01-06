@@ -80,15 +80,7 @@ export interface ListRecordsResponse {
   cursor?: string;
 }
 
-// Bloom filter data structure (re-exported from bloom.ts for convenience)
-export interface BloomFilterData {
-  bits: string; // Base64-encoded bit array
-  size: number; // Number of bits in the filter
-  numHashes: number; // Number of hash functions used
-  count: number; // Number of elements added
-}
-
-// Cached block list for a single user (legacy - full DID array)
+// Cached block list for a single user
 export interface UserBlockCache {
   did: string;
   handle: string;
@@ -98,22 +90,10 @@ export interface UserBlockCache {
   lastSynced: number;
 }
 
-// Space-efficient block cache using bloom filter (hybrid approach)
-export interface UserBlockBloomCache {
-  did: string;
-  handle: string;
-  displayName?: string;
-  avatar?: string;
-  pdsUrl?: string; // Cached PDS URL to avoid re-resolution
-  bloomFilter: BloomFilterData; // Bloom filter for "might contain" checks
-  blockCount: number; // Total number of blocks (for stats)
-  lastSynced: number;
-}
-
-// Main cache structure stored in chrome.storage.local (bloom filter version)
+// Main cache structure stored in chrome.storage.local
 export interface BlockCacheData {
   followedUsers: FollowedUser[];
-  userBlockCaches: Record<string, UserBlockBloomCache>; // Now uses bloom filters
+  userBlockCaches: Record<string, UserBlockCache>; // Direct DID arrays (bloom filters had too many false positives)
   lastFullSync: number;
   currentUserDid: string;
 }
@@ -147,7 +127,6 @@ export interface PlcDocument {
 export type MessageType =
   | 'SET_AUTH'
   | 'GET_BLOCKING_INFO'
-  | 'GET_VERIFIED_BLOCKERS'
   | 'FETCH_PROFILE_BLOCKS'
   | 'TRIGGER_SYNC'
   | 'GET_SYNC_STATUS'
@@ -158,7 +137,6 @@ export interface Message {
   profileDid?: string;
   handle?: string;
   auth?: BskySession;
-  candidateDids?: string[]; // For GET_VERIFIED_BLOCKERS
 }
 
 export interface MessageResponse {
@@ -167,7 +145,6 @@ export interface MessageResponse {
   blockingInfo?: BlockingInfo;
   blocks?: string[];
   syncStatus?: SyncStatus;
-  verifiedBlockers?: FollowedUser[]; // For GET_VERIFIED_BLOCKERS response
 }
 
 // Display mode for blocking info

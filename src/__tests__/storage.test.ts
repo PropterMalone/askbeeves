@@ -9,19 +9,9 @@ import {
   getStoredAuth,
   storeAuth,
   lookupBlockingInfo,
-  getCandidateBlockers,
+  getBlockers,
   clearAllData,
 } from '../storage.js';
-
-// Mock bloom filter module
-vi.mock('../bloom.js', () => ({
-  bloomFilterMightContain: vi.fn((filter, did) => {
-    // Simple mock: return true if the filter's "mockBlocks" contains the DID
-    // This is set up in tests by adding a mockBlocks property
-    return filter.mockBlocks?.includes(did) ?? false;
-  }),
-  estimateFalsePositiveRate: vi.fn(() => 0.001), // Mock 0.1% FP rate
-}));
 
 type StorageResult = Record<string, unknown>;
 
@@ -121,8 +111,7 @@ describe('Storage Module', () => {
         did: 'did:user1',
         handle: 'user1.bsky.social',
         displayName: 'User 1',
-        bloomFilter: { bits: 'AAAA', size: 64, numHashes: 7, count: 1 },
-        blockCount: 1,
+        blocks: ['did:blocked1'],
         lastSynced: Date.now(),
       };
 
@@ -143,8 +132,7 @@ describe('Storage Module', () => {
         did: 'did:user1',
         handle: 'user1.bsky.social',
         displayName: 'User 1',
-        bloomFilter: { bits: 'AAAA', size: 64, numHashes: 7, count: 0 },
-        blockCount: 0,
+        blocks: [],
         lastSynced: Date.now(),
       };
 
@@ -264,8 +252,8 @@ describe('Storage Module', () => {
     });
   });
 
-  describe('getCandidateBlockers', () => {
-    it('should return candidates from bloom filter matches', async () => {
+  describe('getBlockers', () => {
+    it('should return users who block the profile', async () => {
       const mockCache = {
         followedUsers: [
           { did: 'did:user1', handle: 'user1.bsky.social' },
@@ -275,15 +263,13 @@ describe('Storage Module', () => {
           'did:user1': {
             did: 'did:user1',
             handle: 'user1.bsky.social',
-            bloomFilter: { bits: 'AAAA', size: 64, numHashes: 7, count: 1, mockBlocks: ['did:profile'] },
-            blockCount: 1,
+            blocks: ['did:profile', 'did:other'],
             lastSynced: Date.now(),
           },
           'did:user2': {
             did: 'did:user2',
             handle: 'user2.bsky.social',
-            bloomFilter: { bits: 'BBBB', size: 64, numHashes: 7, count: 0, mockBlocks: [] },
-            blockCount: 0,
+            blocks: ['did:someone-else'],
             lastSynced: Date.now(),
           },
         },
@@ -295,23 +281,49 @@ describe('Storage Module', () => {
         blockCache: mockCache,
       } as StorageResult);
 
-      const candidates = await getCandidateBlockers('did:profile');
+      const blockers = await getBlockers('did:profile');
 
-      expect(candidates).toHaveLength(1);
-      expect(candidates[0].handle).toBe('user1.bsky.social');
+      expect(blockers).toHaveLength(1);
+      expect(blockers[0].handle).toBe('user1.bsky.social');
     });
 
     it('should return empty array when no cache exists', async () => {
       vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({} as StorageResult);
 
-      const candidates = await getCandidateBlockers('did:profile');
+      const blockers = await getBlockers('did:profile');
 
-      expect(candidates).toEqual([]);
+      expect(blockers).toEqual([]);
+    });
+
+    it('should return empty array when no one blocks the profile', async () => {
+      const mockCache = {
+        followedUsers: [
+          { did: 'did:user1', handle: 'user1.bsky.social' },
+        ],
+        userBlockCaches: {
+          'did:user1': {
+            did: 'did:user1',
+            handle: 'user1.bsky.social',
+            blocks: ['did:someone-else'],
+            lastSynced: Date.now(),
+          },
+        },
+        lastFullSync: Date.now(),
+        currentUserDid: 'did:me',
+      };
+
+      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+        blockCache: mockCache,
+      } as StorageResult);
+
+      const blockers = await getBlockers('did:profile');
+
+      expect(blockers).toEqual([]);
     });
   });
 
   describe('lookupBlockingInfo', () => {
-    it('should find users from verified blockers list', async () => {
+    it('should find users who block the profile from cached blocks', async () => {
       const mockCache = {
         followedUsers: [
           { did: 'did:user1', handle: 'user1.bsky.social' },
@@ -321,8 +333,7 @@ describe('Storage Module', () => {
           'did:user1': {
             did: 'did:user1',
             handle: 'user1.bsky.social',
-            bloomFilter: { bits: 'AAAA', size: 64, numHashes: 7, count: 1 },
-            blockCount: 1,
+            blocks: ['did:profile'],
             lastSynced: Date.now(),
           },
         },
@@ -330,12 +341,12 @@ describe('Storage Module', () => {
         currentUserDid: 'did:me',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
         blockCache: mockCache,
       } as StorageResult);
 
-      // Verified that user1 blocks the profile
-      const result = await lookupBlockingInfo('did:profile', ['did:user1'], []);
+      // lookupBlockingInfo now takes (profileDid, profileBlocks)
+      const result = await lookupBlockingInfo('did:profile', []);
 
       expect(result.blockedBy).toHaveLength(1);
       expect(result.blockedBy[0].handle).toBe('user1.bsky.social');
@@ -352,21 +363,21 @@ describe('Storage Module', () => {
         currentUserDid: 'did:me',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
         blockCache: mockCache,
       } as StorageResult);
 
-      // Profile blocks user1 (from on-demand fetch)
-      const result = await lookupBlockingInfo('did:profile', [], ['did:user1']);
+      // Profile blocks user1 (passed as profileBlocks parameter)
+      const result = await lookupBlockingInfo('did:profile', ['did:user1']);
 
       expect(result.blocking).toHaveLength(1);
       expect(result.blocking[0].handle).toBe('user1.bsky.social');
     });
 
     it('should return empty arrays when no cache exists', async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({} as StorageResult);
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as StorageResult);
 
-      const result = await lookupBlockingInfo('did:profile', [], []);
+      const result = await lookupBlockingInfo('did:profile', []);
 
       expect(result.blockedBy).toEqual([]);
       expect(result.blocking).toEqual([]);
@@ -379,8 +390,7 @@ describe('Storage Module', () => {
           'did:user1': {
             did: 'did:user1',
             handle: 'user1.bsky.social',
-            bloomFilter: { bits: 'AAAA', size: 64, numHashes: 7, count: 1 },
-            blockCount: 1,
+            blocks: ['did:profile'],
             lastSynced: Date.now(),
           },
         },
@@ -388,12 +398,12 @@ describe('Storage Module', () => {
         currentUserDid: 'did:me',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      vi.mocked(chrome.storage.local.get).mockResolvedValue({
         blockCache: mockCache,
       } as StorageResult);
 
-      // User1 verified to block profile, profile blocks user1
-      const result = await lookupBlockingInfo('did:profile', ['did:user1'], ['did:user1']);
+      // User1 blocks profile (in cache), profile blocks user1 (passed as parameter)
+      const result = await lookupBlockingInfo('did:profile', ['did:user1']);
 
       expect(result.blockedBy).toHaveLength(1);
       expect(result.blocking).toHaveLength(1);

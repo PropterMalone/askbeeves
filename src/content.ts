@@ -16,6 +16,12 @@ let lastBlockingInfo: BlockingInfo | null = null;
 let lastDisplayMode: DisplayMode = 'compact';
 let lastProfileDid: string | null = null;
 
+// Cached avatar style to avoid repeated DOM queries
+let cachedAvatarStyle: { size: string; overlap: string } | null = null;
+
+// Default avatar SVG as data URI (computed once)
+const DEFAULT_AVATAR = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
+
 /**
  * Extract profile handle from the URL
  */
@@ -137,9 +143,14 @@ function formatUserList(
 }
 
 /**
- * Get avatar styling from Bluesky's "Followed by" section
+ * Get avatar styling from Bluesky's "Followed by" section (cached)
  */
 function getFollowedByAvatarStyle(): { size: string; overlap: string } {
+  // Return cached value if available
+  if (cachedAvatarStyle) {
+    return cachedAvatarStyle;
+  }
+
   // Find avatar images in the "Followed by" row
   const followedByText = document.evaluate(
     "//*[contains(text(), 'Followed by')]",
@@ -150,7 +161,6 @@ function getFollowedByAvatarStyle(): { size: string; overlap: string } {
   ).singleNodeValue as HTMLElement | null;
 
   if (followedByText) {
-    // Look for img elements near the "Followed by" text
     const parent = followedByText.parentElement;
     if (parent) {
       const imgs = parent.querySelectorAll('img');
@@ -158,20 +168,20 @@ function getFollowedByAvatarStyle(): { size: string; overlap: string } {
         const firstImg = imgs[0] as HTMLElement;
         const style = window.getComputedStyle(firstImg);
         const size = style.width || '32px';
-        // Check margin-left of second image for overlap
         let overlap = '-8px';
         if (imgs.length > 1) {
           const secondStyle = window.getComputedStyle(imgs[1]);
           overlap = secondStyle.marginLeft || '-8px';
         }
-        console.log('[AskBeeves] Detected avatar style:', { size, overlap });
-        return { size, overlap };
+        cachedAvatarStyle = { size, overlap };
+        return cachedAvatarStyle;
       }
     }
   }
 
   // Fallback defaults
-  return { size: '32px', overlap: '-8px' };
+  cachedAvatarStyle = { size: '32px', overlap: '-8px' };
+  return cachedAvatarStyle;
 }
 
 /**
@@ -182,37 +192,22 @@ function createAvatarRow(
   sampledUsers: Array<{ displayName?: string; handle: string; avatar?: string }>
 ): HTMLElement {
   const container = document.createElement('div');
-  container.style.cssText = `
-    display: flex;
-    align-items: center;
-    margin-right: 4px;
-  `;
+  container.style.cssText = 'display:flex;align-items:center;margin-right:4px';
 
-  // Get actual sizes from Bluesky's "Followed by" avatars
   const { size, overlap } = getFollowedByAvatarStyle();
 
-  // Display up to 3 avatars from the pre-sampled users
-  const displayUsers = sampledUsers.slice(0, 3);
-  displayUsers.forEach((user, index) => {
+  // Display up to 3 avatars
+  const count = Math.min(sampledUsers.length, 3);
+  for (let i = 0; i < count; i++) {
+    const user = sampledUsers[i];
     const avatar = document.createElement('img');
-    avatar.src = user.avatar || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
+    avatar.src = user.avatar || DEFAULT_AVATAR;
     avatar.alt = user.displayName || user.handle;
     avatar.title = user.displayName || `@${user.handle}`;
-    avatar.style.cssText = `
-      width: ${size};
-      height: ${size};
-      border-radius: 50%;
-      object-fit: cover;
-      margin-left: ${index > 0 ? overlap : '0'};
-      position: relative;
-      z-index: ${3 - index};
-      box-shadow: 0 0 0 2px white;
-    `;
-    avatar.onerror = () => {
-      avatar.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
-    };
+    avatar.style.cssText = `width:${size};height:${size};border-radius:50%;object-fit:cover;margin-left:${i > 0 ? overlap : '0'};position:relative;z-index:${3 - i};box-shadow:0 0 0 2px white`;
+    avatar.onerror = () => { avatar.src = DEFAULT_AVATAR; };
     container.appendChild(avatar);
-  });
+  }
 
   return container;
 }
@@ -225,289 +220,65 @@ function showFullListModal(
   title: string
 ): void {
   // Remove any existing modal
-  const existing = document.getElementById('askbeeves-full-list-modal');
-  if (existing) existing.remove();
+  document.getElementById('askbeeves-full-list-modal')?.remove();
 
   const overlay = document.createElement('div');
   overlay.id = 'askbeeves-full-list-modal';
-  overlay.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10001;
-  `;
+  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10001';
 
   const dialog = document.createElement('div');
-  dialog.style.cssText = `
-    background: white;
-    border-radius: 12px;
-    padding: 20px;
-    min-width: 320px;
-    max-width: 480px;
-    max-height: 60vh;
-    overflow-y: auto;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  `;
+  dialog.style.cssText = 'background:white;border-radius:12px;padding:20px;min-width:320px;max-width:480px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
 
   const titleEl = document.createElement('h3');
-  titleEl.style.cssText = `
-    margin: 0 0 16px 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #425780;
-  `;
+  titleEl.style.cssText = 'margin:0 0 16px 0;font-size:16px;font-weight:600;color:#425780';
   titleEl.textContent = title;
 
   const listEl = document.createElement('div');
-  listEl.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  `;
+  listEl.style.cssText = 'display:flex;flex-direction:column;gap:4px';
 
+  // Use DocumentFragment to batch DOM operations
+  const fragment = document.createDocumentFragment();
   for (const user of users) {
     const item = document.createElement('div');
-    item.style.cssText = `
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 8px 0;
-      border-bottom: 1px solid #e5e7eb;
-    `;
+    item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb';
 
     const avatar = document.createElement('img');
-    avatar.src = user.avatar || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
+    avatar.src = user.avatar || DEFAULT_AVATAR;
     avatar.alt = user.displayName || user.handle;
-    avatar.style.cssText = `
-      width: 32px;
-      height: 32px;
-      border-radius: 50%;
-      object-fit: cover;
-    `;
-    avatar.onerror = () => {
-      avatar.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
-    };
+    avatar.style.cssText = 'width:32px;height:32px;border-radius:50%;object-fit:cover';
+    avatar.onerror = () => { avatar.src = DEFAULT_AVATAR; };
 
     const textContainer = document.createElement('div');
-    textContainer.style.cssText = `display: flex; flex-direction: column;`;
+    textContainer.style.cssText = 'display:flex;flex-direction:column';
 
     if (user.displayName) {
       const displayNameEl = document.createElement('span');
-      displayNameEl.style.cssText = `font-size: 14px; font-weight: 600; color: #1a1a1a;`;
+      displayNameEl.style.cssText = 'font-size:14px;font-weight:600;color:#1a1a1a';
       displayNameEl.textContent = user.displayName;
       textContainer.appendChild(displayNameEl);
     }
 
     const handleEl = document.createElement('span');
-    handleEl.style.cssText = `font-size: 13px; color: #687882;`;
+    handleEl.style.cssText = 'font-size:13px;color:#687882';
     handleEl.textContent = `@${user.handle}`;
     textContainer.appendChild(handleEl);
 
     item.appendChild(avatar);
     item.appendChild(textContainer);
-    listEl.appendChild(item);
+    fragment.appendChild(item);
   }
+  listEl.appendChild(fragment);
 
   const closeBtn = document.createElement('button');
-  closeBtn.style.cssText = `
-    margin-top: 16px;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 8px;
-    background: #1083fe;
-    color: white;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    width: 100%;
-  `;
+  closeBtn.style.cssText = 'margin-top:16px;padding:10px 16px;border:none;border-radius:8px;background:#1083fe;color:white;cursor:pointer;font-size:14px;font-weight:600;width:100%';
   closeBtn.textContent = 'Close';
-  closeBtn.addEventListener('click', () => overlay.remove());
+  closeBtn.onclick = () => overlay.remove();
 
-  dialog.appendChild(titleEl);
-  dialog.appendChild(listEl);
-  dialog.appendChild(closeBtn);
+  dialog.append(titleEl, listEl, closeBtn);
   overlay.appendChild(dialog);
-
-  // Close on overlay click
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
-  });
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
   document.body.appendChild(overlay);
-}
-
-/**
- * Show a modal with verified blockers (verifies bloom filter candidates on click)
- */
-async function showVerifiedBlockersModal(
-  candidateUsers: Array<{ displayName?: string; handle: string; avatar?: string; did: string }>,
-  profileDid: string,
-  title: string
-): Promise<void> {
-  // Remove any existing modal
-  const existing = document.getElementById('askbeeves-full-list-modal');
-  if (existing) existing.remove();
-
-  const overlay = document.createElement('div');
-  overlay.id = 'askbeeves-full-list-modal';
-  overlay.style.cssText = `
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10001;
-  `;
-
-  const dialog = document.createElement('div');
-  dialog.style.cssText = `
-    background: white;
-    border-radius: 12px;
-    padding: 20px;
-    min-width: 320px;
-    max-width: 480px;
-    max-height: 60vh;
-    overflow-y: auto;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  `;
-
-  const titleEl = document.createElement('h3');
-  titleEl.style.cssText = `
-    margin: 0 0 16px 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #425780;
-  `;
-  titleEl.textContent = title;
-
-  const listEl = document.createElement('div');
-  listEl.style.cssText = `
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  `;
-
-  // Show loading state
-  const loadingEl = document.createElement('div');
-  loadingEl.style.cssText = `
-    text-align: center;
-    padding: 20px;
-    color: #687882;
-  `;
-  loadingEl.textContent = 'Verifying blockers...';
-  listEl.appendChild(loadingEl);
-
-  const closeBtn = document.createElement('button');
-  closeBtn.style.cssText = `
-    margin-top: 16px;
-    padding: 10px 16px;
-    border: none;
-    border-radius: 8px;
-    background: #1083fe;
-    color: white;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 600;
-    width: 100%;
-  `;
-  closeBtn.textContent = 'Close';
-  closeBtn.addEventListener('click', () => overlay.remove());
-
-  dialog.appendChild(titleEl);
-  dialog.appendChild(listEl);
-  dialog.appendChild(closeBtn);
-  overlay.appendChild(dialog);
-
-  // Close on overlay click
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) overlay.remove();
-  });
-
-  document.body.appendChild(overlay);
-
-  // Now verify the candidates
-  try {
-    const response = await chrome.runtime.sendMessage({
-      type: 'GET_VERIFIED_BLOCKERS',
-      profileDid,
-      candidateDids: candidateUsers.map((u) => u.did),
-    } as Message);
-
-    // Clear loading state
-    listEl.innerHTML = '';
-
-    if (!response?.success || !response.verifiedBlockers) {
-      listEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc2626;">Failed to verify blockers</div>';
-      return;
-    }
-
-    const verifiedBlockers = response.verifiedBlockers as Array<{ displayName?: string; handle: string; avatar?: string }>;
-
-    if (verifiedBlockers.length === 0) {
-      listEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #687882;">No verified blockers found</div>';
-      return;
-    }
-
-    // Display verified blockers
-    for (const user of verifiedBlockers) {
-      const item = document.createElement('div');
-      item.style.cssText = `
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 8px 0;
-        border-bottom: 1px solid #e5e7eb;
-      `;
-
-      const avatar = document.createElement('img');
-      avatar.src = user.avatar || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
-      avatar.alt = user.displayName || user.handle;
-      avatar.style.cssText = `
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        object-fit: cover;
-      `;
-      avatar.onerror = () => {
-        avatar.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
-      };
-
-      const textContainer = document.createElement('div');
-      textContainer.style.cssText = `display: flex; flex-direction: column;`;
-
-      if (user.displayName) {
-        const displayNameEl = document.createElement('span');
-        displayNameEl.style.cssText = `font-size: 14px; font-weight: 600; color: #1a1a1a;`;
-        displayNameEl.textContent = user.displayName;
-        textContainer.appendChild(displayNameEl);
-      }
-
-      const handleEl = document.createElement('span');
-      handleEl.style.cssText = `font-size: 13px; color: #687882;`;
-      handleEl.textContent = `@${user.handle}`;
-      textContainer.appendChild(handleEl);
-
-      item.appendChild(avatar);
-      item.appendChild(textContainer);
-      listEl.appendChild(item);
-    }
-  } catch (error) {
-    console.error('[AskBeeves] Error verifying blockers:', error);
-    listEl.innerHTML = '<div style="text-align: center; padding: 20px; color: #dc2626;">Error verifying blockers</div>';
-  }
 }
 
 /**
@@ -702,24 +473,16 @@ function injectContainer(
   insertionPoint: HTMLElement,
   blockingInfo: BlockingInfo,
   displayMode: DisplayMode,
-  profileDid: string
+  _profileDid: string
 ): void {
-  // Click handlers for modals
-  // For "blocked by", use verification modal since bloom filter candidates may have false positives
+  // Click handlers for modals - both use direct lookup now (no bloom filter false positives)
   const onBlockedByClick = () => {
-    // Convert to the format needed for verification (need DIDs)
-    const candidatesWithDids = blockingInfo.blockedBy.map((u) => ({
-      ...u,
-      did: u.did,
-    }));
-    showVerifiedBlockersModal(
-      candidatesWithDids,
-      profileDid,
+    showFullListModal(
+      blockingInfo.blockedBy,
       'Blocked by (users you follow who block this profile)'
     );
   };
 
-  // For "blocking", no verification needed - we fetched actual blocks from the profile
   const onBlockingClick = () => {
     showFullListModal(
       blockingInfo.blocking,
@@ -1018,6 +781,7 @@ function handleUrlChange(): void {
     injectionInProgress = false;
     lastBlockingInfo = null;
     lastProfileDid = null;
+    cachedAvatarStyle = null; // Reset cached style for new page
 
     // Stop the container guard
     if (containerGuardObserver) {
