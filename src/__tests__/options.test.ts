@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
+// Mock browser module
+const mockSendMessageFn = vi.fn();
+vi.mock('../browser.js', () => ({
+  runtime: {
+    sendMessage: mockSendMessageFn,
+  },
+}));
+
 // Mock storage module before importing options
 vi.mock('../storage.js', () => ({
   getSettings: vi.fn(),
@@ -9,8 +17,6 @@ vi.mock('../storage.js', () => ({
 import { getSettings, saveSettings } from '../storage.js';
 
 describe('Options Page', () => {
-  let mockSendMessage: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -25,29 +31,12 @@ describe('Options Page', () => {
       <div id="saved-indicator" style="opacity: 0"></div>
     `;
 
-    // Mock chrome.runtime.sendMessage
-    mockSendMessage = vi.fn();
-    mockAddEventListener = vi.fn();
-
-    vi.stubGlobal('chrome', {
-      runtime: {
-        sendMessage: mockSendMessage,
-      },
-      storage: {
-        sync: {
-          get: vi.fn(),
-          set: vi.fn(),
-        },
-      },
-    });
-
     // Default mock implementations
     vi.mocked(getSettings).mockResolvedValue({ displayMode: 'compact' });
     vi.mocked(saveSettings).mockResolvedValue(undefined);
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
     vi.useRealTimers();
     document.body.innerHTML = '';
   });
@@ -55,7 +44,7 @@ describe('Options Page', () => {
   describe('init', () => {
     it('should set compact radio checked when displayMode is compact', async () => {
       vi.mocked(getSettings).mockResolvedValue({ displayMode: 'compact' });
-      mockSendMessage.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
+      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
 
       // Import fresh module to trigger init
       const { init } = await import('../options.js');
@@ -70,7 +59,7 @@ describe('Options Page', () => {
 
     it('should set detailed radio checked when displayMode is detailed', async () => {
       vi.mocked(getSettings).mockResolvedValue({ displayMode: 'detailed' });
-      mockSendMessage.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
+      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
 
       const { init } = await import('../options.js');
       await init();
@@ -83,7 +72,7 @@ describe('Options Page', () => {
     });
 
     it('should add change listeners to radio buttons', async () => {
-      mockSendMessage.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
+      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
 
       const { init } = await import('../options.js');
       await init();
@@ -99,7 +88,7 @@ describe('Options Page', () => {
     });
 
     it('should add click listeners to buttons', async () => {
-      mockSendMessage.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
+      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
 
       const { init } = await import('../options.js');
       await init();
@@ -109,7 +98,7 @@ describe('Options Page', () => {
       // Trigger click
       refreshBtn.click();
 
-      expect(mockSendMessage).toHaveBeenCalledWith({ type: 'TRIGGER_SYNC' });
+      expect(mockSendMessageFn).toHaveBeenCalledWith({ type: 'TRIGGER_SYNC' });
     });
   });
 
@@ -122,7 +111,7 @@ describe('Options Page', () => {
         isRunning: false,
         errors: [],
       };
-      mockSendMessage.mockResolvedValue({ success: true, syncStatus: mockStatus });
+      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: mockStatus });
 
       const { loadSyncStatus } = await import('../options.js');
       await loadSyncStatus();
@@ -141,7 +130,7 @@ describe('Options Page', () => {
         isRunning: false,
         errors: [],
       };
-      mockSendMessage.mockResolvedValue({ success: true, syncStatus: mockStatus });
+      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: mockStatus });
 
       const { loadSyncStatus } = await import('../options.js');
       await loadSyncStatus();
@@ -158,7 +147,7 @@ describe('Options Page', () => {
         isRunning: true,
         errors: [],
       };
-      mockSendMessage.mockResolvedValue({ success: true, syncStatus: mockStatus });
+      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: mockStatus });
 
       const { loadSyncStatus } = await import('../options.js');
       await loadSyncStatus();
@@ -175,7 +164,7 @@ describe('Options Page', () => {
         isRunning: false,
         errors: ['error1', 'error2'],
       };
-      mockSendMessage.mockResolvedValue({ success: true, syncStatus: mockStatus });
+      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: mockStatus });
 
       const { loadSyncStatus } = await import('../options.js');
       await loadSyncStatus();
@@ -185,7 +174,7 @@ describe('Options Page', () => {
     });
 
     it('should show error message when response fails', async () => {
-      mockSendMessage.mockResolvedValue({ success: false });
+      mockSendMessageFn.mockResolvedValue({ success: false });
 
       const { loadSyncStatus } = await import('../options.js');
       await loadSyncStatus();
@@ -195,7 +184,7 @@ describe('Options Page', () => {
     });
 
     it('should show error message on exception', async () => {
-      mockSendMessage.mockRejectedValue(new Error('Network error'));
+      mockSendMessageFn.mockRejectedValue(new Error('Network error'));
 
       const { loadSyncStatus } = await import('../options.js');
       await loadSyncStatus();
@@ -211,22 +200,22 @@ describe('Options Page', () => {
       await loadSyncStatus();
 
       // Should not throw
-      expect(mockSendMessage).not.toHaveBeenCalled();
+      expect(mockSendMessageFn).not.toHaveBeenCalled();
     });
   });
 
   describe('triggerSync', () => {
     it('should send TRIGGER_SYNC message', async () => {
-      mockSendMessage.mockResolvedValue({ success: true });
+      mockSendMessageFn.mockResolvedValue({ success: true });
 
       const { triggerSync } = await import('../options.js');
       await triggerSync();
 
-      expect(mockSendMessage).toHaveBeenCalledWith({ type: 'TRIGGER_SYNC' });
+      expect(mockSendMessageFn).toHaveBeenCalledWith({ type: 'TRIGGER_SYNC' });
     });
 
     it('should show "Starting sync..." message', async () => {
-      mockSendMessage.mockResolvedValue({ success: true });
+      mockSendMessageFn.mockResolvedValue({ success: true });
 
       const { triggerSync } = await import('../options.js');
       await triggerSync();
@@ -236,7 +225,7 @@ describe('Options Page', () => {
     });
 
     it('should reload status after 1 second', async () => {
-      mockSendMessage
+      mockSendMessageFn
         .mockResolvedValueOnce({ success: true }) // TRIGGER_SYNC
         .mockResolvedValueOnce({ success: true, syncStatus: { lastSync: Date.now(), totalFollows: 10, syncedFollows: 10, isRunning: false, errors: [] } }); // GET_SYNC_STATUS
 
@@ -247,11 +236,11 @@ describe('Options Page', () => {
       await vi.advanceTimersByTimeAsync(1000);
 
       // Should have called sendMessage twice (TRIGGER_SYNC + GET_SYNC_STATUS from loadSyncStatus)
-      expect(mockSendMessage).toHaveBeenCalledTimes(2);
+      expect(mockSendMessageFn).toHaveBeenCalledTimes(2);
     });
 
     it('should show error message on failure', async () => {
-      mockSendMessage.mockRejectedValue(new Error('Sync failed'));
+      mockSendMessageFn.mockRejectedValue(new Error('Sync failed'));
 
       const { triggerSync } = await import('../options.js');
       await triggerSync();
@@ -263,16 +252,16 @@ describe('Options Page', () => {
 
   describe('clearCache', () => {
     it('should send CLEAR_CACHE message', async () => {
-      mockSendMessage.mockResolvedValue({ success: true });
+      mockSendMessageFn.mockResolvedValue({ success: true });
 
       const { clearCache } = await import('../options.js');
       await clearCache();
 
-      expect(mockSendMessage).toHaveBeenCalledWith({ type: 'CLEAR_CACHE' });
+      expect(mockSendMessageFn).toHaveBeenCalledWith({ type: 'CLEAR_CACHE' });
     });
 
     it('should show "Clearing cache..." message', async () => {
-      mockSendMessage.mockResolvedValue({ success: true });
+      mockSendMessageFn.mockResolvedValue({ success: true });
 
       const { clearCache } = await import('../options.js');
       await clearCache();
@@ -282,7 +271,7 @@ describe('Options Page', () => {
     });
 
     it('should show error message on failure', async () => {
-      mockSendMessage.mockRejectedValue(new Error('Clear failed'));
+      mockSendMessageFn.mockRejectedValue(new Error('Clear failed'));
 
       const { clearCache } = await import('../options.js');
       await clearCache();

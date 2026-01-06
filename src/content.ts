@@ -894,15 +894,29 @@ function observeNavigation(): void {
     handleUrlChange();
   });
 
-  // Listen for clicks on links (catches SPA navigation more reliably)
+  // Listen for ALL clicks and check URL after a delay
+  // This catches profile picture clicks that may use various navigation mechanisms
   document.addEventListener('click', (e) => {
     const target = e.target as HTMLElement;
+
+    // Check if click is on or near a profile-related element
+    // This includes: links to profiles, avatar images, user cards, etc.
     const link = target.closest('a');
-    if (link?.href?.includes('/profile/')) {
-      // Delay to let the navigation happen first
-      setTimeout(() => {
-        handleUrlChange();
-      }, 100);
+    const isProfileLink = link?.href?.includes('/profile/');
+
+    // Also check for clicks on images (avatars) that might be inside links
+    const isAvatarClick = target.tagName === 'IMG' || target.closest('img') !== null;
+
+    // Check for clicks on elements with profile-related data attributes or classes
+    const hasProfileRole = target.closest('[data-testid*="avatar"]') !== null ||
+                          target.closest('[data-testid*="profile"]') !== null;
+
+    if (isProfileLink || isAvatarClick || hasProfileRole) {
+      // Check URL at multiple intervals to catch navigation
+      // Different SPAs may update URL at different times
+      setTimeout(() => handleUrlChange(), 50);
+      setTimeout(() => handleUrlChange(), 150);
+      setTimeout(() => handleUrlChange(), 300);
     }
   }, true);
 
@@ -913,14 +927,29 @@ function observeNavigation(): void {
   history.pushState = function (...args) {
     originalPushState.apply(this, args);
     console.log('[AskBeeves] pushState detected');
+    // Check immediately and after a delay for DOM to update
     handleUrlChange();
+    setTimeout(() => checkAndInjectIfNeeded(), 50);
   };
 
   history.replaceState = function (...args) {
     originalReplaceState.apply(this, args);
     console.log('[AskBeeves] replaceState detected');
     handleUrlChange();
+    setTimeout(() => checkAndInjectIfNeeded(), 50);
   };
+
+  // URL polling as a fallback - catches any navigation mechanism we might miss
+  // Poll every 500ms - lightweight and catches edge cases
+  let lastPolledUrl = window.location.href;
+  setInterval(() => {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastPolledUrl) {
+      console.log('[AskBeeves] URL change detected via polling');
+      lastPolledUrl = currentUrl;
+      handleUrlChange();
+    }
+  }, 500);
 
   console.log('[AskBeeves] Navigation observer started');
 }
