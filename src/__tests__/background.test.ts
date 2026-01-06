@@ -23,20 +23,9 @@ vi.mock('../storage.js', () => ({
   getStoredAuth: vi.fn(),
   storeAuth: vi.fn(),
   lookupBlockingInfo: vi.fn(),
-  getCandidateBlockers: vi.fn(),
   updateSyncStatus: vi.fn(),
   getSyncStatus: vi.fn(),
   updateUserBlockCache: vi.fn(),
-}));
-
-vi.mock('../bloom.js', () => ({
-  bloomFilterFromArray: vi.fn(() => ({
-    bits: 'AAAA',
-    size: 64,
-    numHashes: 7,
-    count: 0,
-  })),
-  bloomFilterMightContain: vi.fn(() => false),
 }));
 
 describe('Background Service Worker', () => {
@@ -199,7 +188,7 @@ describe('Background Service Worker', () => {
     });
 
     it('should handle GET_BLOCKING_INFO message', async () => {
-      const { lookupBlockingInfo, getBlockCache, getCandidateBlockers } = await import('../storage.js');
+      const { lookupBlockingInfo, getBlockCache } = await import('../storage.js');
       const { getUserBlocks } = await import('../api.js');
 
       vi.mocked(getBlockCache).mockResolvedValueOnce({
@@ -208,9 +197,6 @@ describe('Background Service Worker', () => {
         lastFullSync: 0,
         currentUserDid: 'did:me',
       });
-
-      // No candidates from bloom filter
-      vi.mocked(getCandidateBlockers).mockResolvedValueOnce([]);
 
       // Profile blocks fetched on-demand
       vi.mocked(getUserBlocks).mockResolvedValueOnce(['did:blocked1']);
@@ -235,10 +221,9 @@ describe('Background Service Worker', () => {
       // Wait for async handler
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(getCandidateBlockers).toHaveBeenCalledWith('did:profile');
       expect(getUserBlocks).toHaveBeenCalledWith('did:profile');
-      // New signature: lookupBlockingInfo(profileDid, verifiedBlockers, profileBlocks)
-      expect(lookupBlockingInfo).toHaveBeenCalledWith('did:profile', [], ['did:blocked1']);
+      // New signature: lookupBlockingInfo(profileDid, profileBlocks)
+      expect(lookupBlockingInfo).toHaveBeenCalledWith('did:profile', ['did:blocked1']);
       expect(sendResponse).toHaveBeenCalledWith({
         success: true,
         blockingInfo: { blockedBy: [], blocking: [] },
@@ -720,11 +705,10 @@ describe('Background Service Worker', () => {
 
   describe('Error handling', () => {
     it('should handle message processing errors gracefully', async () => {
-      const { lookupBlockingInfo, getBlockCache, getCandidateBlockers } = await import('../storage.js');
+      const { lookupBlockingInfo, getBlockCache } = await import('../storage.js');
       const { getUserBlocks } = await import('../api.js');
 
       vi.mocked(getBlockCache).mockResolvedValueOnce(null);
-      vi.mocked(getCandidateBlockers).mockResolvedValueOnce([]);
       vi.mocked(getUserBlocks).mockResolvedValueOnce([]);
       vi.mocked(lookupBlockingInfo).mockRejectedValueOnce(new Error('Storage error'));
 

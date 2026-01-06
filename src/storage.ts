@@ -7,13 +7,12 @@ import {
   SyncStatus,
   BlockingInfo,
   FollowedUser,
-  UserBlockBloomCache,
+  UserBlockCache,
   UserSettings,
   DEFAULT_SETTINGS,
   STORAGE_KEYS,
   BskySession,
 } from './types.js';
-import { bloomFilterMightContain, estimateFalsePositiveRate } from './bloom.js';
 
 /**
  * Get cached block data from storage
@@ -44,9 +43,9 @@ export function createEmptyCache(currentUserDid: string): BlockCacheData {
 }
 
 /**
- * Update a single user's block cache (bloom filter version)
+ * Update a single user's block cache
  */
-export async function updateUserBlockCache(userCache: UserBlockBloomCache): Promise<void> {
+export async function updateUserBlockCache(userCache: UserBlockCache): Promise<void> {
   const cache = await getBlockCache();
   if (!cache) return;
 
@@ -99,78 +98,53 @@ export async function storeAuth(auth: BskySession): Promise<void> {
 }
 
 /**
- * Get candidate blockers using bloom filters (may include false positives)
- * Returns DIDs of followed users whose bloom filter indicates they MIGHT block the profile
- * These need to be verified by fetching actual block lists
+ * Get blockers for a profile from cache (exact lookup, no false positives)
+ * Returns users you follow who have this profileDid in their block list
+ * @param profileDid - The DID to check for blocks against
+ * @param cache - Optional pre-fetched cache to avoid redundant storage reads
  */
-export async function getCandidateBlockers(profileDid: string): Promise<FollowedUser[]> {
-  const cache = await getBlockCache();
-  if (!cache) {
-    console.log('[AskBeeves Storage] getCandidateBlockers: no cache');
+export async function getBlockers(
+  profileDid: string,
+  cache?: BlockCacheData | null
+): Promise<FollowedUser[]> {
+  const blockCache = cache ?? (await getBlockCache());
+  if (!blockCache) {
     return [];
   }
 
-  const candidates: FollowedUser[] = [];
-  let usersWithBloomFilters = 0;
-  let totalBlockCount = 0;
-  let minBlocks = Infinity;
-  let maxBlocks = 0;
-  let totalFpRate = 0;
-  let saturatedFilters = 0;
+  const blockers: FollowedUser[] = [];
 
-  for (const user of cache.followedUsers) {
-    const userCache = cache.userBlockCaches[user.did];
-    if (userCache?.bloomFilter) {
-      usersWithBloomFilters++;
-      totalBlockCount += userCache.blockCount || 0;
-      minBlocks = Math.min(minBlocks, userCache.blockCount || 0);
-      maxBlocks = Math.max(maxBlocks, userCache.blockCount || 0);
+  for (const user of blockCache.followedUsers) {
+    const userCache = blockCache.userBlockCaches[user.did];
+    if (!userCache?.blocks?.length) continue;
 
-      // Check estimated FP rate
-      const fpRate = estimateFalsePositiveRate(userCache.bloomFilter);
-      totalFpRate += fpRate;
-      if (fpRate > 0.5) {
-        saturatedFilters++;
-      }
+    // Use Set for O(1) lookup when block list is large
+    const hasBlock =
+      userCache.blocks.length > 20
+        ? new Set(userCache.blocks).has(profileDid)
+        : userCache.blocks.includes(profileDid);
 
-      if (bloomFilterMightContain(userCache.bloomFilter, profileDid)) {
-        candidates.push({
-          did: user.did,
-          handle: userCache.handle || user.handle,
-          displayName: userCache.displayName || user.displayName,
-          avatar: userCache.avatar || user.avatar,
-        });
-      }
+    if (hasBlock) {
+      blockers.push({
+        did: user.did,
+        handle: userCache.handle || user.handle,
+        displayName: userCache.displayName || user.displayName,
+        avatar: userCache.avatar || user.avatar,
+      });
     }
   }
 
-  const avgBlocks = usersWithBloomFilters > 0 ? Math.round(totalBlockCount / usersWithBloomFilters) : 0;
-  const avgFpRate = usersWithBloomFilters > 0 ? (totalFpRate / usersWithBloomFilters * 100).toFixed(1) : '0';
-  const candidateRate = usersWithBloomFilters > 0 ? ((candidates.length / usersWithBloomFilters) * 100).toFixed(1) : '0';
-
-  console.log(
-    `[AskBeeves Storage] getCandidateBlockers: checked ${usersWithBloomFilters} bloom filters, found ${candidates.length} candidates (${candidateRate}%) for ${profileDid}`
-  );
-  console.log(
-    `[AskBeeves Storage] Block stats: avg=${avgBlocks}, min=${minBlocks === Infinity ? 0 : minBlocks}, max=${maxBlocks}`
-  );
-  console.log(
-    `[AskBeeves Storage] Bloom filter stats: avg FP rate=${avgFpRate}%, saturated (>50% FP)=${saturatedFilters}`
-  );
-
-  return candidates;
+  return blockers;
 }
 
 /**
  * Look up blocking info for a specific profile DID
  * Returns users you follow who block this profile, and users you follow that this profile blocks
  * @param profileDid - The DID of the profile being viewed
- * @param verifiedBlockers - DIDs of users verified to actually block this profile (from API fetch)
  * @param profileBlocks - Pre-fetched blocks for this profile (for "blocking" relationship)
  */
 export async function lookupBlockingInfo(
   profileDid: string,
-  verifiedBlockers: string[],
   profileBlocks: string[]
 ): Promise<BlockingInfo> {
   const cache = await getBlockCache();
@@ -178,33 +152,18 @@ export async function lookupBlockingInfo(
     return { blockedBy: [], blocking: [] };
   }
 
-  const blockedBy: FollowedUser[] = [];
-  const blocking: FollowedUser[] = [];
+  // Get blockers (users you follow who block this profile) - pass cache to avoid refetch
+  const blockedBy = await getBlockers(profileDid, cache);
 
-  // Build a set of followed DIDs for quick lookup
-  const followedDids = new Set(cache.followedUsers.map((u) => u.did));
-
-  // Convert verified blockers to FollowedUser objects
-  const verifiedSet = new Set(verifiedBlockers);
-  for (const user of cache.followedUsers) {
-    if (verifiedSet.has(user.did)) {
-      const userCache = cache.userBlockCaches[user.did];
-      blockedBy.push({
-        did: user.did,
-        handle: userCache?.handle || user.handle,
-        displayName: userCache?.displayName || user.displayName,
-        avatar: userCache?.avatar || user.avatar,
-      });
-    }
-  }
+  // Build a Map for O(1) user lookup by DID
+  const followedByDid = new Map(cache.followedUsers.map((u) => [u.did, u]));
 
   // Find users you follow that this profile blocks
+  const blocking: FollowedUser[] = [];
   for (const blockedDid of profileBlocks) {
-    if (followedDids.has(blockedDid)) {
-      const user = cache.followedUsers.find((u) => u.did === blockedDid);
-      if (user) {
-        blocking.push(user);
-      }
+    const user = followedByDid.get(blockedDid);
+    if (user) {
+      blocking.push(user);
     }
   }
 
