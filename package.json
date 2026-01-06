@@ -8,6 +8,9 @@
   },
   "scripts": {
     "build": "node scripts/bundle.js",
+    "build:chrome": "node scripts/bundle.js --chrome",
+    "build:firefox": "node scripts/bundle.js --firefox",
+    "build:all": "node scripts/bundle.js --all",
     "dev": "node scripts/bundle.js --watch",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -17,6 +20,7 @@
   },
   "devDependencies": {
     "@types/chrome": "^0.1.32",
+    "@types/webextension-polyfill": "^0.12.4",
     "@typescript-eslint/eslint-plugin": "^8.51.0",
     "@typescript-eslint/parser": "^8.51.0",
     "@vitest/coverage-v8": "^4.0.16",
@@ -28,5 +32,8 @@
     "prettier": "^3.7.4",
     "typescript": "^5.9.3",
     "vitest": "^4.0.16"
+  },
+  "dependencies": {
+    "webextension-polyfill": "^0.12.0"
   }
 }

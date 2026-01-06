@@ -1,11 +1,13 @@
 /**
  * AskBeeves - Content script for Bluesky profile pages
  * Injects blocking info UI and syncs auth token
+ * Works with both Chrome and Firefox
  */
 
+import { runtime } from './browser.js';
 import { getSession, getProfile } from './api.js';
 import { getSettings } from './storage.js';
-import { BlockingInfo, Message, DisplayMode } from './types.js';
+import { BlockingInfo, Message, MessageResponse, DisplayMode } from './types.js';
 
 let currentObserver: MutationObserver | null = null;
 let lastInjectedHandle: string | null = null;
@@ -560,22 +562,29 @@ function startContainerGuard(): void {
 
 /**
  * Wait for profile insertion point to appear (with timeout)
- * Uses requestAnimationFrame for better performance
+ * Uses polling with increasing intervals for better reliability
  */
-async function waitForProfileInsertionPoint(maxWaitMs: number = 5000): Promise<HTMLElement | null> {
+async function waitForProfileInsertionPoint(maxWaitMs: number = 10000): Promise<HTMLElement | null> {
   return new Promise((resolve) => {
     const startTime = Date.now();
+    let attempts = 0;
 
     const check = () => {
+      attempts++;
       const element = findProfileInsertionPoint();
       if (element) {
+        console.log(`[AskBeeves] Found insertion point after ${attempts} attempts, ${Date.now() - startTime}ms`);
         resolve(element);
         return;
       }
 
-      if (Date.now() - startTime < maxWaitMs) {
-        requestAnimationFrame(check);
+      const elapsed = Date.now() - startTime;
+      if (elapsed < maxWaitMs) {
+        // Use increasing intervals: 50ms for first 10 attempts, then 100ms, then 200ms
+        const interval = attempts < 10 ? 50 : attempts < 20 ? 100 : 200;
+        setTimeout(check, interval);
       } else {
+        console.log(`[AskBeeves] Insertion point not found after ${attempts} attempts, ${elapsed}ms`);
         resolve(null);
       }
     };
@@ -625,8 +634,26 @@ async function injectBlockingInfo(): Promise<void> {
   if (!insertionPoint) {
     console.log('[AskBeeves] No profile insertion point found after waiting');
     injectionInProgress = false;
+
+    // Schedule a retry if we haven't exceeded max retries
+    if (retryCount < MAX_RETRIES) {
+      retryCount++;
+      const delay = retryCount * 1000; // 1s, 2s, 3s
+      console.log(`[AskBeeves] Scheduling retry ${retryCount}/${MAX_RETRIES} in ${delay}ms`);
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        const currentHandle = getProfileHandleFromUrl();
+        if (currentHandle === handle) {
+          injectBlockingInfo();
+        }
+      }, delay);
+    }
     return;
   }
+
+  // Reset retry count on successful find
+  retryCount = 0;
 
   // Wait for profile resolution
   const profile = await profilePromise;
@@ -656,7 +683,7 @@ async function injectBlockingInfo(): Promise<void> {
   }
 
   // Get blocking info from background script
-  let response;
+  let response: MessageResponse | undefined;
   try {
     if (!isExtensionContextValid()) {
       console.log('[AskBeeves] Extension context invalidated, skipping message');
@@ -664,7 +691,7 @@ async function injectBlockingInfo(): Promise<void> {
       injectionInProgress = false;
       return;
     }
-    response = await chrome.runtime.sendMessage({
+    response = await runtime.sendMessage<MessageResponse>({
       type: 'GET_BLOCKING_INFO',
       profileDid: profile.did,
     } as Message);
@@ -740,7 +767,7 @@ async function injectBlockingInfo(): Promise<void> {
  */
 function isExtensionContextValid(): boolean {
   try {
-    return !!(chrome?.runtime?.id);
+    return !!runtime.id;
   } catch {
     return false;
   }
@@ -770,13 +797,18 @@ function checkAndInjectIfNeeded(): void {
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
     injectBlockingInfo();
-  }, 200);
+  }, 150);
 }
 
 /**
  * Track current URL for detecting SPA navigation
  */
 let lastUrl = window.location.href;
+
+// Retry timer for failed injections
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryCount = 0;
+const MAX_RETRIES = 3;
 
 /**
  * Handle URL changes (SPA navigation)
@@ -793,6 +825,7 @@ function handleUrlChange(): void {
     lastBlockingInfo = null;
     lastProfileDid = null;
     cachedAvatarStyle = null; // Reset cached style for new page
+    retryCount = 0;
 
     // Stop the container guard
     if (containerGuardObserver) {
@@ -800,10 +833,14 @@ function handleUrlChange(): void {
       containerGuardObserver = null;
     }
 
-    // Clear any pending debounce
+    // Clear any pending timers
     if (debounceTimer) {
       clearTimeout(debounceTimer);
       debounceTimer = null;
+    }
+    if (retryTimer) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
     }
 
     // Remove existing container immediately on navigation
@@ -817,10 +854,10 @@ function handleUrlChange(): void {
     const handle = getProfileHandleFromUrl();
     if (handle) {
       console.log('[AskBeeves] Navigated to profile:', handle);
-      // Trigger injection after DOM settles
+      // Trigger injection - use shorter initial delay, rely on waitForProfileInsertionPoint
       setTimeout(() => {
         injectBlockingInfo();
-      }, 250);
+      }, 100);
     }
   }
 }
@@ -902,7 +939,7 @@ async function syncAuthToBackground(): Promise<void> {
   console.log('[AskBeeves] Session found:', session ? `DID=${session.did}` : 'null');
   if (session?.accessJwt && session?.did && session?.pdsUrl) {
     try {
-      await chrome.runtime.sendMessage({
+      await runtime.sendMessage({
         type: 'SET_AUTH',
         auth: session,
       } as Message);
@@ -916,6 +953,21 @@ async function syncAuthToBackground(): Promise<void> {
       !session?.did ? 'did' : '',
       !session?.pdsUrl ? 'pdsUrl' : ''
     );
+  }
+}
+
+/**
+ * Periodic check to ensure injection didn't fail silently
+ */
+function periodicInjectionCheck(): void {
+  const handle = getProfileHandleFromUrl();
+  if (!handle) return;
+
+  // If we're on a profile page but don't have an injected container, try again
+  const container = document.getElementById('askbeeves-blocking-container');
+  if (!container && !injectionInProgress && handle !== lastInjectedHandle) {
+    console.log('[AskBeeves] Periodic check: no container found, triggering injection');
+    injectBlockingInfo();
   }
 }
 
@@ -936,6 +988,18 @@ function init(): void {
 
   // Periodically sync auth every 5 minutes
   setInterval(syncAuthToBackground, 5 * 60 * 1000);
+
+  // Periodic check to catch missed injections (every 2 seconds for first 30 seconds, then every 10 seconds)
+  let checkCount = 0;
+  const periodicCheckInterval = setInterval(() => {
+    checkCount++;
+    periodicInjectionCheck();
+    // After 15 checks (30 seconds), slow down to every 10 seconds
+    if (checkCount === 15) {
+      clearInterval(periodicCheckInterval);
+      setInterval(periodicInjectionCheck, 10000);
+    }
+  }, 2000);
 }
 
 // Initialize when DOM is ready

@@ -1,4 +1,27 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+
+// Create mock storage functions
+const mockStorageLocalGet = vi.fn();
+const mockStorageLocalSet = vi.fn();
+const mockStorageLocalClear = vi.fn();
+const mockStorageSyncGet = vi.fn();
+const mockStorageSyncSet = vi.fn();
+
+// Mock the browser module before importing storage
+vi.mock('../browser.js', () => ({
+  storage: {
+    local: {
+      get: (keys: string | string[]) => mockStorageLocalGet(keys),
+      set: (items: Record<string, unknown>) => mockStorageLocalSet(items),
+      clear: () => mockStorageLocalClear(),
+    },
+    sync: {
+      get: (keys: string | string[]) => mockStorageSyncGet(keys),
+      set: (items: Record<string, unknown>) => mockStorageSyncSet(items),
+    },
+  },
+}));
+
 import {
   getBlockCache,
   saveBlockCache,
@@ -13,27 +36,13 @@ import {
   clearAllData,
 } from '../storage.js';
 
-type StorageResult = Record<string, unknown>;
-
 describe('Storage Module', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-
-    const storageMock = {
-      local: {
-        get: vi.fn(),
-        set: vi.fn(),
-        clear: vi.fn(),
-      },
-    };
-
-    vi.stubGlobal('chrome', {
-      storage: storageMock,
-    } as unknown as typeof chrome);
   });
 
   afterEach(() => {
-    vi.unstubAllGlobals();
+    vi.clearAllMocks();
   });
 
   describe('getBlockCache', () => {
@@ -45,18 +54,16 @@ describe('Storage Module', () => {
         currentUserDid: 'did:test',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      mockStorageLocalGet.mockResolvedValueOnce({
         blockCache: mockCache,
-      } as unknown as Record<string, unknown>);
+      });
 
       const cache = await getBlockCache();
       expect(cache).toEqual(mockCache);
     });
 
     it('should return null when no cache exists', async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce(
-        {} as unknown as Record<string, unknown>
-      );
+      mockStorageLocalGet.mockResolvedValueOnce({});
 
       const cache = await getBlockCache();
       expect(cache).toBeNull();
@@ -65,7 +72,7 @@ describe('Storage Module', () => {
 
   describe('saveBlockCache', () => {
     it('should save cache to storage', async () => {
-      vi.mocked(chrome.storage.local.set).mockResolvedValueOnce(undefined);
+      mockStorageLocalSet.mockResolvedValueOnce(undefined);
 
       const mockCache = {
         followedUsers: [],
@@ -75,7 +82,7 @@ describe('Storage Module', () => {
       };
 
       await saveBlockCache(mockCache);
-      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      expect(mockStorageLocalSet).toHaveBeenCalledWith({
         blockCache: mockCache,
       });
     });
@@ -101,11 +108,11 @@ describe('Storage Module', () => {
         currentUserDid: 'did:test',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      mockStorageLocalGet.mockResolvedValueOnce({
         blockCache: mockCache,
-      } as StorageResult);
+      });
 
-      vi.mocked(chrome.storage.local.set).mockResolvedValueOnce(undefined);
+      mockStorageLocalSet.mockResolvedValueOnce(undefined);
 
       const userCache = {
         did: 'did:user1',
@@ -117,16 +124,13 @@ describe('Storage Module', () => {
 
       await updateUserBlockCache(userCache);
 
-      expect(chrome.storage.local.set).toHaveBeenCalled();
-      const callArg = vi.mocked(chrome.storage.local.set).mock.calls[0][0] as Record<
-        string,
-        unknown
-      >;
+      expect(mockStorageLocalSet).toHaveBeenCalled();
+      const callArg = mockStorageLocalSet.mock.calls[0][0] as Record<string, unknown>;
       expect((callArg.blockCache as Record<string, unknown>).userBlockCaches).toBeDefined();
     });
 
     it('should handle missing cache gracefully', async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({} as StorageResult);
+      mockStorageLocalGet.mockResolvedValueOnce({});
 
       const userCache = {
         did: 'did:user1',
@@ -137,13 +141,13 @@ describe('Storage Module', () => {
       };
 
       await updateUserBlockCache(userCache);
-      expect(chrome.storage.local.set).not.toHaveBeenCalled();
+      expect(mockStorageLocalSet).not.toHaveBeenCalled();
     });
   });
 
   describe('getSyncStatus', () => {
     it('should return default sync status when none exists', async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({} as StorageResult);
+      mockStorageLocalGet.mockResolvedValueOnce({});
 
       const status = await getSyncStatus();
 
@@ -164,9 +168,9 @@ describe('Storage Module', () => {
         errors: [],
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      mockStorageLocalGet.mockResolvedValueOnce({
         syncStatus: mockStatus,
-      } as StorageResult);
+      });
 
       const status = await getSyncStatus();
       expect(status).toEqual(mockStatus);
@@ -184,11 +188,11 @@ describe('Storage Module', () => {
         errors: [],
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      mockStorageLocalGet.mockResolvedValueOnce({
         syncStatus: currentStatus,
-      } as StorageResult);
+      });
 
-      vi.mocked(chrome.storage.local.set).mockResolvedValueOnce(undefined);
+      mockStorageLocalSet.mockResolvedValueOnce(undefined);
 
       const beforeUpdate = Date.now();
       await updateSyncStatus({
@@ -196,11 +200,8 @@ describe('Storage Module', () => {
         syncedFollows: 50,
       });
 
-      expect(chrome.storage.local.set).toHaveBeenCalled();
-      const callArg = vi.mocked(chrome.storage.local.set).mock.calls[0][0] as Record<
-        string,
-        unknown
-      >;
+      expect(mockStorageLocalSet).toHaveBeenCalled();
+      const callArg = mockStorageLocalSet.mock.calls[0][0] as Record<string, unknown>;
       const syncStatusData = callArg.syncStatus as Record<string, unknown>;
       expect(syncStatusData.isRunning).toBe(true);
       expect(syncStatusData.syncedFollows).toBe(50);
@@ -218,16 +219,16 @@ describe('Storage Module', () => {
         pdsUrl: 'https://pds.test.com',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      mockStorageLocalGet.mockResolvedValueOnce({
         authToken: mockAuth,
-      } as StorageResult);
+      });
 
       const auth = await getStoredAuth();
       expect(auth).toEqual(mockAuth);
     });
 
     it('should return null when no auth exists', async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({} as StorageResult);
+      mockStorageLocalGet.mockResolvedValueOnce({});
 
       const auth = await getStoredAuth();
       expect(auth).toBeNull();
@@ -236,7 +237,7 @@ describe('Storage Module', () => {
 
   describe('storeAuth', () => {
     it('should store auth token', async () => {
-      vi.mocked(chrome.storage.local.set).mockResolvedValueOnce(undefined);
+      mockStorageLocalSet.mockResolvedValueOnce(undefined);
 
       const mockAuth = {
         accessJwt: 'jwt-456',
@@ -246,7 +247,7 @@ describe('Storage Module', () => {
       };
 
       await storeAuth(mockAuth);
-      expect(chrome.storage.local.set).toHaveBeenCalledWith({
+      expect(mockStorageLocalSet).toHaveBeenCalledWith({
         authToken: mockAuth,
       });
     });
@@ -277,9 +278,9 @@ describe('Storage Module', () => {
         currentUserDid: 'did:me',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      mockStorageLocalGet.mockResolvedValueOnce({
         blockCache: mockCache,
-      } as StorageResult);
+      });
 
       const blockers = await getBlockers('did:profile');
 
@@ -288,7 +289,7 @@ describe('Storage Module', () => {
     });
 
     it('should return empty array when no cache exists', async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({} as StorageResult);
+      mockStorageLocalGet.mockResolvedValueOnce({});
 
       const blockers = await getBlockers('did:profile');
 
@@ -312,9 +313,9 @@ describe('Storage Module', () => {
         currentUserDid: 'did:me',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValueOnce({
+      mockStorageLocalGet.mockResolvedValueOnce({
         blockCache: mockCache,
-      } as StorageResult);
+      });
 
       const blockers = await getBlockers('did:profile');
 
@@ -341,9 +342,9 @@ describe('Storage Module', () => {
         currentUserDid: 'did:me',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+      mockStorageLocalGet.mockResolvedValue({
         blockCache: mockCache,
-      } as StorageResult);
+      });
 
       // lookupBlockingInfo now takes (profileDid, profileBlocks)
       const result = await lookupBlockingInfo('did:profile', []);
@@ -363,9 +364,9 @@ describe('Storage Module', () => {
         currentUserDid: 'did:me',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+      mockStorageLocalGet.mockResolvedValue({
         blockCache: mockCache,
-      } as StorageResult);
+      });
 
       // Profile blocks user1 (passed as profileBlocks parameter)
       const result = await lookupBlockingInfo('did:profile', ['did:user1']);
@@ -375,7 +376,7 @@ describe('Storage Module', () => {
     });
 
     it('should return empty arrays when no cache exists', async () => {
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({} as StorageResult);
+      mockStorageLocalGet.mockResolvedValue({});
 
       const result = await lookupBlockingInfo('did:profile', []);
 
@@ -398,9 +399,9 @@ describe('Storage Module', () => {
         currentUserDid: 'did:me',
       };
 
-      vi.mocked(chrome.storage.local.get).mockResolvedValue({
+      mockStorageLocalGet.mockResolvedValue({
         blockCache: mockCache,
-      } as StorageResult);
+      });
 
       // User1 blocks profile (in cache), profile blocks user1 (passed as parameter)
       const result = await lookupBlockingInfo('did:profile', ['did:user1']);
@@ -412,10 +413,10 @@ describe('Storage Module', () => {
 
   describe('clearAllData', () => {
     it('should clear all storage data', async () => {
-      vi.mocked(chrome.storage.local.clear).mockResolvedValueOnce(undefined);
+      mockStorageLocalClear.mockResolvedValueOnce(undefined);
 
       await clearAllData();
-      expect(chrome.storage.local.clear).toHaveBeenCalled();
+      expect(mockStorageLocalClear).toHaveBeenCalled();
     });
   });
 });

@@ -1,8 +1,10 @@
 /**
- * AskBeeves - Service worker background script
+ * AskBeeves - Background script
  * Handles periodic sync, message processing, and block list caching
+ * Works as service worker (Chrome MV3) or background script (Firefox MV2)
  */
 
+import { runtime, alarms } from './browser.js';
 import { getAllFollows, getUserBlocks, chunk, sleep } from './api.js';
 import {
   getBlockCache,
@@ -237,8 +239,8 @@ async function performFullSync(): Promise<void> {
  * Setup the periodic sync alarm
  */
 async function setupAlarm(): Promise<void> {
-  await chrome.alarms.clear(ALARM_NAME);
-  await chrome.alarms.create(ALARM_NAME, {
+  await alarms.clear(ALARM_NAME);
+  await alarms.create(ALARM_NAME, {
     periodInMinutes: SYNC_INTERVAL_MINUTES,
   });
   console.log(`[AskBeeves BG] Alarm set to ${SYNC_INTERVAL_MINUTES} minutes`);
@@ -412,10 +414,13 @@ function initializeExtension(): void {
   setupAlarm();
 
   // Sync auth from content script
-  chrome.runtime.onMessage.addListener(handleMessage);
+  // Cast the handler to the expected type - we know our messages are Message type
+  runtime.onMessage.addListener((message, sender, sendResponse) =>
+    handleMessage(message as Message, sender, sendResponse as (response: MessageResponse) => void)
+  );
 
   // Set up alarm listener
-  chrome.alarms.onAlarm.addListener((alarm) => {
+  alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === ALARM_NAME) {
       console.log('[AskBeeves BG] Alarm triggered, starting sync');
       performFullSync();
@@ -424,13 +429,13 @@ function initializeExtension(): void {
 }
 
 // Initialize on install
-chrome.runtime.onInstalled.addListener(() => {
+runtime.onInstalled.addListener(() => {
   console.log('[AskBeeves BG] Extension installed');
   initializeExtension();
 });
 
 // Initialize on startup
-chrome.runtime.onStartup.addListener(() => {
+runtime.onStartup.addListener(() => {
   console.log('[AskBeeves BG] Extension started');
   initializeExtension();
 });
