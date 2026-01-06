@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "AskBeeves for Bluesky",
-  "version": "1.0.0",
+  "version": "1.2.1",
   "description": "See who you follow that blocks or is blocked by a profile",
   "permissions": [
     "storage",
