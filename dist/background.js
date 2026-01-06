@@ -196,6 +196,46 @@ var SYNC_INTERVAL_MINUTES = 60;
 var RATE_LIMIT_CONCURRENT = 5;
 var RATE_LIMIT_DELAY_MS = 500;
 var STALE_LOCK_TIMEOUT_MS = 5 * 60 * 1e3;
+var MAX_CACHE_SIZE_BYTES = 8 * 1024 * 1024;
+function estimateObjectSize(obj) {
+  return new Blob([JSON.stringify(obj)]).size;
+}
+function pruneCache(cache) {
+  const usersWithBlockCounts = Object.entries(cache.userBlockCaches).map(([did, data]) => ({ did, blockCount: data.blocks.length })).sort((a, b) => b.blockCount - a.blockCount);
+  let currentSize = estimateObjectSize(cache);
+  let prunedCount = 0;
+  for (const { did } of usersWithBlockCounts) {
+    if (currentSize <= MAX_CACHE_SIZE_BYTES) break;
+    const removedSize = estimateObjectSize(cache.userBlockCaches[did]);
+    delete cache.userBlockCaches[did];
+    currentSize -= removedSize;
+    prunedCount++;
+  }
+  if (prunedCount > 0) {
+    console.log(`[AskBeeves BG] Pruned ${prunedCount} users from cache to fit size limit`);
+  }
+}
+async function safeSaveBlockCache(cache) {
+  try {
+    await saveBlockCache(cache);
+    return true;
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    if (errorMsg.includes("QUOTA_BYTES") || errorMsg.includes("quota")) {
+      console.log("[AskBeeves BG] Quota exceeded, pruning cache...");
+      pruneCache(cache);
+      try {
+        await saveBlockCache(cache);
+        console.log("[AskBeeves BG] Successfully saved pruned cache");
+        return true;
+      } catch (retryError) {
+        console.error("[AskBeeves BG] Failed to save even after pruning:", retryError);
+        return false;
+      }
+    }
+    throw error;
+  }
+}
 async function performFullSync() {
   console.log("[AskBeeves BG] Starting full sync...");
   const syncStatus = await getSyncStatus();
@@ -222,6 +262,12 @@ async function performFullSync() {
     let cache = await getBlockCache();
     if (!cache || cache.currentUserDid !== auth.did) {
       cache = createEmptyCache(auth.did);
+    }
+    const initialSize = estimateObjectSize(cache);
+    if (initialSize > MAX_CACHE_SIZE_BYTES * 0.9) {
+      console.log(`[AskBeeves BG] Cache size (${Math.round(initialSize / 1024 / 1024)}MB) approaching limit, pruning...`);
+      pruneCache(cache);
+      await safeSaveBlockCache(cache);
     }
     console.log("[AskBeeves BG] Fetching all follows...");
     const follows = await getAllFollows(auth.did);
@@ -266,12 +312,12 @@ async function performFullSync() {
       });
       await Promise.all(blockPromises);
       if ((chunkIndex + 1) % SAVE_INTERVAL === 0 || chunkIndex === chunks.length - 1) {
-        try {
-          cache.lastFullSync = Date.now();
-          await saveBlockCache(cache);
+        cache.lastFullSync = Date.now();
+        const saved = await safeSaveBlockCache(cache);
+        if (saved) {
           console.log(`[AskBeeves BG] Saved cache (batch ${chunkIndex + 1}/${chunks.length})`);
-        } catch (saveError) {
-          console.error("[AskBeeves BG] Failed to save cache:", saveError);
+        } else {
+          console.error("[AskBeeves BG] Failed to save cache after pruning");
         }
       }
       if (chunkIndex < chunks.length - 1) {
