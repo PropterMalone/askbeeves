@@ -5,7 +5,7 @@
 import { getSettings, saveSettings } from './storage.js';
 import { DisplayMode, Message, SyncStatus } from './types.js';
 
-async function init(): Promise<void> {
+export async function init(): Promise<void> {
   const settings = await getSettings();
 
   // Set initial radio button state
@@ -37,7 +37,7 @@ async function init(): Promise<void> {
   }
 }
 
-async function loadSyncStatus(): Promise<void> {
+export async function loadSyncStatus(): Promise<void> {
   const statusEl = document.getElementById('sync-status');
   if (!statusEl) return;
 
@@ -51,12 +51,29 @@ async function loadSyncStatus(): Promise<void> {
       const lastSync = status.lastSync ? new Date(status.lastSync).toLocaleString() : 'Never';
       const isRunning = status.isRunning ? ' (syncing...)' : '';
 
-      statusEl.innerHTML = `
-        <div><strong>Last sync:</strong> ${lastSync}${isRunning}</div>
-        <div><strong>Follows:</strong> ${status.totalFollows || 0}</div>
-        <div><strong>Synced:</strong> ${status.syncedFollows || 0}</div>
-        ${status.errors?.length ? `<div style="color: #dc2626;"><strong>Errors:</strong> ${status.errors.length}</div>` : ''}
-      `;
+      // Clear existing content safely
+      statusEl.textContent = '';
+
+      // Build DOM elements safely (avoids XSS)
+      const createStatusRow = (label: string, value: string | number, color?: string): HTMLDivElement => {
+        const row = document.createElement('div');
+        const strong = document.createElement('strong');
+        strong.textContent = `${label}: `;
+        row.appendChild(strong);
+        row.appendChild(document.createTextNode(String(value)));
+        if (color) {
+          row.style.color = color;
+        }
+        return row;
+      };
+
+      statusEl.appendChild(createStatusRow('Last sync', `${lastSync}${isRunning}`));
+      statusEl.appendChild(createStatusRow('Follows', status.totalFollows || 0));
+      statusEl.appendChild(createStatusRow('Synced', status.syncedFollows || 0));
+
+      if (status.errors?.length) {
+        statusEl.appendChild(createStatusRow('Errors', status.errors.length, '#dc2626'));
+      }
     } else {
       statusEl.textContent = 'Could not load sync status';
     }
@@ -66,7 +83,7 @@ async function loadSyncStatus(): Promise<void> {
   }
 }
 
-async function triggerSync(): Promise<void> {
+export async function triggerSync(): Promise<void> {
   const statusEl = document.getElementById('sync-status');
   if (statusEl) {
     statusEl.textContent = 'Starting sync...';
@@ -87,7 +104,7 @@ async function triggerSync(): Promise<void> {
   }
 }
 
-async function clearCache(): Promise<void> {
+export async function clearCache(): Promise<void> {
   const statusEl = document.getElementById('sync-status');
   if (statusEl) {
     statusEl.textContent = 'Clearing cache...';
@@ -108,7 +125,7 @@ async function clearCache(): Promise<void> {
   }
 }
 
-async function handleDisplayModeChange(mode: DisplayMode): Promise<void> {
+export async function handleDisplayModeChange(mode: DisplayMode): Promise<void> {
   const settings = await getSettings();
   settings.displayMode = mode;
   await saveSettings(settings);
