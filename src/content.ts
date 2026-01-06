@@ -349,6 +349,11 @@ async function injectBlockingInfo(): Promise<void> {
   // Get blocking info from background script
   let response;
   try {
+    if (!isExtensionContextValid()) {
+      console.log('[AskBeeves] Extension context invalidated, skipping message');
+      injectionInProgress = false;
+      return;
+    }
     response = await chrome.runtime.sendMessage({
       type: 'GET_BLOCKING_INFO',
       profileDid: profile.did,
@@ -480,6 +485,17 @@ async function injectBlockingInfo(): Promise<void> {
 }
 
 /**
+ * Check if extension context is still valid
+ */
+function isExtensionContextValid(): boolean {
+  try {
+    return !!(chrome?.runtime?.id);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check if we're on a profile page and inject if needed
  */
 function checkAndInjectIfNeeded(): void {
@@ -578,6 +594,11 @@ function observeNavigation(): void {
  * Sync auth token to background script
  */
 async function syncAuthToBackground(): Promise<void> {
+  if (!isExtensionContextValid()) {
+    console.log('[AskBeeves] Extension context invalidated, skipping auth sync');
+    return;
+  }
+
   console.log('[AskBeeves] Attempting to sync auth...');
   const session = getSession();
   console.log('[AskBeeves] Session found:', session ? `DID=${session.did}` : 'null');
