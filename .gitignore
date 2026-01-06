@@ -1,6 +1,7 @@
 node_modules/
 coverage/
 dist/
+dist-firefox/
 *.log
 .DS_Store
 *.zip

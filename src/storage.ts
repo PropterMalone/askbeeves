@@ -1,7 +1,9 @@
 /**
- * AskBeeves - Chrome storage helpers
+ * AskBeeves - Browser storage helpers
+ * Works with both Chrome and Firefox via abstraction layer
  */
 
+import { storage } from './browser.js';
 import {
   BlockCacheData,
   SyncStatus,
@@ -18,7 +20,7 @@ import {
  * Get cached block data from storage
  */
 export async function getBlockCache(): Promise<BlockCacheData | null> {
-  const result = await chrome.storage.local.get(STORAGE_KEYS.BLOCK_CACHE);
+  const result = await storage.local.get(STORAGE_KEYS.BLOCK_CACHE);
   const data = result[STORAGE_KEYS.BLOCK_CACHE] as BlockCacheData | undefined;
   return data || null;
 }
@@ -27,7 +29,7 @@ export async function getBlockCache(): Promise<BlockCacheData | null> {
  * Save block cache to storage
  */
 export async function saveBlockCache(data: BlockCacheData): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEYS.BLOCK_CACHE]: data });
+  await storage.local.set({ [STORAGE_KEYS.BLOCK_CACHE]: data });
 }
 
 /**
@@ -57,7 +59,7 @@ export async function updateUserBlockCache(userCache: UserBlockCache): Promise<v
  * Get sync status
  */
 export async function getSyncStatus(): Promise<SyncStatus> {
-  const result = await chrome.storage.local.get(STORAGE_KEYS.SYNC_STATUS);
+  const result = await storage.local.get(STORAGE_KEYS.SYNC_STATUS);
   const data = result[STORAGE_KEYS.SYNC_STATUS] as SyncStatus | undefined;
   return (
     data || {
@@ -76,7 +78,7 @@ export async function getSyncStatus(): Promise<SyncStatus> {
  */
 export async function updateSyncStatus(status: Partial<SyncStatus>): Promise<void> {
   const current = await getSyncStatus();
-  await chrome.storage.local.set({
+  await storage.local.set({
     [STORAGE_KEYS.SYNC_STATUS]: { ...current, ...status, lastUpdated: Date.now() },
   });
 }
@@ -85,7 +87,7 @@ export async function updateSyncStatus(status: Partial<SyncStatus>): Promise<voi
  * Get stored auth token
  */
 export async function getStoredAuth(): Promise<BskySession | null> {
-  const result = await chrome.storage.local.get(STORAGE_KEYS.AUTH_TOKEN);
+  const result = await storage.local.get(STORAGE_KEYS.AUTH_TOKEN);
   const data = result[STORAGE_KEYS.AUTH_TOKEN] as BskySession | undefined;
   return data || null;
 }
@@ -94,7 +96,7 @@ export async function getStoredAuth(): Promise<BskySession | null> {
  * Store auth token
  */
 export async function storeAuth(auth: BskySession): Promise<void> {
-  await chrome.storage.local.set({ [STORAGE_KEYS.AUTH_TOKEN]: auth });
+  await storage.local.set({ [STORAGE_KEYS.AUTH_TOKEN]: auth });
 }
 
 /**
@@ -174,7 +176,7 @@ export async function lookupBlockingInfo(
  * Get user settings
  */
 export async function getSettings(): Promise<UserSettings> {
-  const result = await chrome.storage.sync.get(STORAGE_KEYS.SETTINGS);
+  const result = await storage.sync.get(STORAGE_KEYS.SETTINGS);
   const data = result[STORAGE_KEYS.SETTINGS] as UserSettings | undefined;
   return data || DEFAULT_SETTINGS;
 }
@@ -183,12 +185,12 @@ export async function getSettings(): Promise<UserSettings> {
  * Save user settings
  */
 export async function saveSettings(settings: UserSettings): Promise<void> {
-  await chrome.storage.sync.set({ [STORAGE_KEYS.SETTINGS]: settings });
+  await storage.sync.set({ [STORAGE_KEYS.SETTINGS]: settings });
 }
 
 /**
  * Clear all extension data
  */
 export async function clearAllData(): Promise<void> {
-  await chrome.storage.local.clear();
+  await storage.local.clear();
 }

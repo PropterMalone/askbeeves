@@ -1,9 +1,11 @@
 /**
  * AskBeeves - Options page script
+ * Works with both Chrome and Firefox
  */
 
+import { runtime } from './browser.js';
 import { getSettings, saveSettings } from './storage.js';
-import { DisplayMode, Message, SyncStatus } from './types.js';
+import { DisplayMode, Message, MessageResponse } from './types.js';
 
 export async function init(): Promise<void> {
   const settings = await getSettings();
@@ -42,12 +44,12 @@ export async function loadSyncStatus(): Promise<void> {
   if (!statusEl) return;
 
   try {
-    const response = await chrome.runtime.sendMessage({
+    const response = await runtime.sendMessage<MessageResponse>({
       type: 'GET_SYNC_STATUS',
     } as Message);
 
     if (response?.success && response.syncStatus) {
-      const status = response.syncStatus as SyncStatus;
+      const status = response.syncStatus;
       const lastSync = status.lastSync ? new Date(status.lastSync).toLocaleString() : 'Never';
       const isRunning = status.isRunning ? ' (syncing...)' : '';
 
@@ -90,7 +92,7 @@ export async function triggerSync(): Promise<void> {
   }
 
   try {
-    await chrome.runtime.sendMessage({
+    await runtime.sendMessage({
       type: 'TRIGGER_SYNC',
     } as Message);
 
@@ -111,7 +113,7 @@ export async function clearCache(): Promise<void> {
   }
 
   try {
-    await chrome.runtime.sendMessage({
+    await runtime.sendMessage({
       type: 'CLEAR_CACHE',
     } as Message);
 
