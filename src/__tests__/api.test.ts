@@ -10,6 +10,9 @@ import {
   sleep,
   chunk,
   clearPdsCache,
+  populatePdsCache,
+  getCachedPds,
+  cachePds,
 } from '../api.js';
 
 describe('API Module', () => {
@@ -64,6 +67,24 @@ describe('API Module', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  describe('PDS Cache', () => {
+    it('should cache and retrieve PDS URL', () => {
+      cachePds('did:1', 'https://pds1.com');
+      expect(getCachedPds('did:1')).toBe('https://pds1.com');
+    });
+
+    it('should populate cache from multiple entries', () => {
+      populatePdsCache([
+        { did: 'did:1', pdsUrl: 'https://pds1.com' },
+        { did: 'did:2', pdsUrl: 'https://pds2.com' },
+        { did: 'did:3', pdsUrl: '' }, // Should be ignored
+      ]);
+      expect(getCachedPds('did:1')).toBe('https://pds1.com');
+      expect(getCachedPds('did:2')).toBe('https://pds2.com');
+      expect(getCachedPds('did:3')).toBeUndefined();
+    });
   });
 
   describe('getSession', () => {
@@ -122,6 +143,21 @@ describe('API Module', () => {
 
       const session = getSession();
       expect(session?.accessJwt).toBe('jwt-789');
+    });
+
+    it('should use account from accounts array matching current DID', () => {
+      const mockSession = {
+        session: {
+          currentAccount: { did: 'did:current' },
+          accounts: [
+            { did: 'did:other', accessJwt: 'jwt-other' },
+            { did: 'did:current', accessJwt: 'jwt-current' },
+          ],
+        },
+      };
+      localStorage.setItem('BSKY_STORAGE', JSON.stringify(mockSession));
+      const session = getSession();
+      expect(session?.accessJwt).toBe('jwt-current');
     });
 
     it('should use service URL if pdsUrl not available', () => {

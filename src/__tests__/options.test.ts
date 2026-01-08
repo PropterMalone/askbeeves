@@ -362,4 +362,23 @@ describe('Options Page', () => {
       expect(saveSettings).toHaveBeenCalled();
     });
   });
+
+  describe('event listener', () => {
+    it('should add DOMContentLoaded listener if state is loading', async () => {
+      // Mock readyState
+      Object.defineProperty(document, 'readyState', {
+        get() {
+          return 'loading';
+        },
+        configurable: true,
+      });
+      const addEventListenerSpy = vi.spyOn(document, 'addEventListener');
+
+      // Re-import module
+      vi.resetModules();
+      await import('../options.js');
+
+      expect(addEventListenerSpy).toHaveBeenCalledWith('DOMContentLoaded', expect.any(Function));
+    });
+  });
 });
