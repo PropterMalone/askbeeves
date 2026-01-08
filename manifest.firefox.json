@@ -1,0 +1,40 @@
+{
+  "manifest_version": 3,
+  "name": "AskBeeves for Bluesky",
+  "version": "1.0.0",
+  "description": "See who you follow that blocks or is blocked by a profile",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "askbeeves@proptermalone",
+      "strict_min_version": "109.0"
+    }
+  },
+  "permissions": ["storage", "alarms"],
+  "host_permissions": [
+    "https://bsky.app/*",
+    "https://bsky.social/*",
+    "https://*.bsky.network/*",
+    "https://public.api.bsky.app/*",
+    "https://plc.directory/*"
+  ],
+  "background": {
+    "scripts": ["background.js"],
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://bsky.app/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": false
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
