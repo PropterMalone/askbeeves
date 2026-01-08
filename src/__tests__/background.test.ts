@@ -318,6 +318,20 @@ describe('Background Service Worker', () => {
       expect(result).toBe(true); // Indicates async
     });
 
+    it('should propagate errors from TRIGGER_SYNC', async () => {
+      // make getSyncStatus throw, which is called early in performFullSync
+      vi.mocked(getSyncStatus).mockRejectedValueOnce(new Error('Critical failure'));
+
+      await import('../background.js');
+      const messageListener = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls[0][0];
+      const sendResponse = vi.fn();
+
+      messageListener({ type: 'TRIGGER_SYNC' }, {} as chrome.runtime.MessageSender, sendResponse);
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(sendResponse).toHaveBeenCalledWith({ success: false, error: 'Critical failure' });
+    });
+
     it('should return error for unknown message type', async () => {
       const messageListener = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls[0][0];
       const sendResponse = vi.fn();
@@ -549,6 +563,69 @@ describe('Background Service Worker', () => {
       await new Promise((resolve) => setTimeout(resolve, 1000));
 
       expect(saveBlockCache).toHaveBeenCalled();
+    });
+
+    it('should trigger sync if cache is incomplete (many follows, few caches)', async () => {
+      vi.mocked(getStoredAuth).mockResolvedValue({
+        accessJwt: 'jwt',
+        did: 'did:me',
+        handle: 'me',
+        pdsUrl: 'p',
+      });
+
+      // 200 follows, but 0 caches -> < 5% -> incomplete
+      const mockCache = {
+        followedUsers: Array.from({ length: 200 }, (_, i) => ({
+          did: `did:${i}`,
+          handle: `u${i}`,
+        })),
+        userBlockCaches: {},
+        lastFullSync: Date.now(),
+        currentUserDid: 'did:me',
+      };
+      vi.mocked(getBlockCache).mockResolvedValueOnce(mockCache);
+
+      await import('../background.js');
+      const messageListener = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls[0][0];
+      const sendResponse = vi.fn();
+
+      messageListener(
+        { type: 'SET_AUTH', auth: { accessJwt: 'jwt', did: 'did:me', handle: 'me', pdsUrl: 'p' } },
+        {} as chrome.runtime.MessageSender,
+        sendResponse
+      );
+
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      // Should trigger sync (getAllFollows is the first step)
+      expect(getAllFollows).toHaveBeenCalled();
+    });
+
+    it('should handle non-quota errors during save', async () => {
+      vi.mocked(getStoredAuth).mockResolvedValue({
+        accessJwt: 'jwt',
+        did: 'did:me',
+        handle: 'me',
+        pdsUrl: 'p',
+      });
+      vi.mocked(getBlockCache).mockResolvedValue({
+        followedUsers: [],
+        userBlockCaches: {},
+        lastFullSync: 0,
+        currentUserDid: 'did:me',
+      });
+      vi.mocked(getAllFollows).mockResolvedValue([{ did: 'd1', handle: 'h1' }]);
+      vi.mocked(getUserBlocks).mockResolvedValue([]);
+
+      // Throw random error
+      vi.mocked(saveBlockCache).mockRejectedValue(new Error('Random DB error'));
+
+      await import('../background.js');
+      const messageListener = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls[0][0];
+      messageListener({ type: 'TRIGGER_SYNC' }, {} as chrome.runtime.MessageSender, vi.fn());
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+      expect(saveBlockCache).toHaveBeenCalled();
+      // Should be caught and logged, not crash
     });
 
     it('should return false if saving fails even after pruning', async () => {

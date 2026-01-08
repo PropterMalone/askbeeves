@@ -151,5 +151,16 @@ describe('Browser Abstraction Layer', () => {
     it('should export the correct browserApi', () => {
       expect(browserApi).toBe(chromeMock);
     });
+
+    it('should use global browser if defined (Firefox)', async () => {
+      vi.resetModules();
+      const firefoxMock = { runtime: { id: 'firefox' } };
+      vi.stubGlobal('browser', firefoxMock);
+
+      const { browserApi: ffApi } = await import('../browser.js');
+      expect(ffApi).toBe(firefoxMock);
+
+      vi.unstubAllGlobals();
+    });
   });
 });
