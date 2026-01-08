@@ -20,7 +20,8 @@ let lastProfileDid: string | null = null;
 let cachedAvatarStyle: { size: string; overlap: string } | null = null;
 
 // Default avatar SVG as data URI (computed once)
-const DEFAULT_AVATAR = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
+const DEFAULT_AVATAR =
+  'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
 
 /**
  * Extract profile handle from the URL
@@ -205,7 +206,9 @@ function createAvatarRow(
     avatar.alt = user.displayName || user.handle;
     avatar.title = user.displayName || `@${user.handle}`;
     avatar.style.cssText = `width:${size};height:${size};border-radius:50%;object-fit:cover;margin-left:${i > 0 ? overlap : '0'};position:relative;z-index:${3 - i};box-shadow:0 0 0 2px white`;
-    avatar.onerror = () => { avatar.src = DEFAULT_AVATAR; };
+    avatar.onerror = () => {
+      avatar.src = DEFAULT_AVATAR;
+    };
     container.appendChild(avatar);
   }
 
@@ -224,10 +227,12 @@ function showFullListModal(
 
   const overlay = document.createElement('div');
   overlay.id = 'askbeeves-full-list-modal';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10001';
+  overlay.style.cssText =
+    'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10001';
 
   const dialog = document.createElement('div');
-  dialog.style.cssText = 'background:white;border-radius:12px;padding:20px;min-width:320px;max-width:480px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+  dialog.style.cssText =
+    'background:white;border-radius:12px;padding:20px;min-width:320px;max-width:480px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
 
   const titleEl = document.createElement('h3');
   titleEl.style.cssText = 'margin:0 0 16px 0;font-size:16px;font-weight:600;color:#425780';
@@ -240,13 +245,16 @@ function showFullListModal(
   const fragment = document.createDocumentFragment();
   for (const user of users) {
     const item = document.createElement('div');
-    item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb';
+    item.style.cssText =
+      'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb';
 
     const avatar = document.createElement('img');
     avatar.src = user.avatar || DEFAULT_AVATAR;
     avatar.alt = user.displayName || user.handle;
     avatar.style.cssText = 'width:32px;height:32px;border-radius:50%;object-fit:cover';
-    avatar.onerror = () => { avatar.src = DEFAULT_AVATAR; };
+    avatar.onerror = () => {
+      avatar.src = DEFAULT_AVATAR;
+    };
 
     const textContainer = document.createElement('div');
     textContainer.style.cssText = 'display:flex;flex-direction:column';
@@ -270,13 +278,16 @@ function showFullListModal(
   listEl.appendChild(fragment);
 
   const closeBtn = document.createElement('button');
-  closeBtn.style.cssText = 'margin-top:16px;padding:10px 16px;border:none;border-radius:8px;background:#1083fe;color:white;cursor:pointer;font-size:14px;font-weight:600;width:100%';
+  closeBtn.style.cssText =
+    'margin-top:16px;padding:10px 16px;border:none;border-radius:8px;background:#1083fe;color:white;cursor:pointer;font-size:14px;font-weight:600;width:100%';
   closeBtn.textContent = 'Close';
   closeBtn.onclick = () => overlay.remove();
 
   dialog.append(titleEl, listEl, closeBtn);
   overlay.appendChild(dialog);
-  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.onclick = (e) => {
+    if (e.target === overlay) overlay.remove();
+  };
 
   document.body.appendChild(overlay);
 }
@@ -301,7 +312,12 @@ function createCompactDisplay(
   const blockedByCount = blockingInfo.blockedBy.length;
   const blockingCount = blockingInfo.blocking.length;
 
-  console.log('[AskBeeves] Compact display - blockedBy:', blockedByCount, 'blocking:', blockingCount);
+  console.log(
+    '[AskBeeves] Compact display - blockedBy:',
+    blockedByCount,
+    'blocking:',
+    blockingCount
+  );
 
   // If nothing to show
   if (blockedByCount === 0 && blockingCount === 0) {
@@ -441,11 +457,7 @@ function createDetailedDisplay(
 
   // "Blocked by" section
   if (blockingInfo.blockedBy.length > 0) {
-    const blockedByRow = createBlockRow(
-      blockingInfo.blockedBy,
-      'Blocked by',
-      onBlockedByClick
-    );
+    const blockedByRow = createBlockRow(blockingInfo.blockedBy, 'Blocked by', onBlockedByClick);
     container.appendChild(blockedByRow);
   } else {
     container.appendChild(createTextOnlyRow('Not blocked by anyone you follow'));
@@ -453,11 +465,7 @@ function createDetailedDisplay(
 
   // "Blocking" section
   if (blockingInfo.blocking.length > 0) {
-    const blockingRow = createBlockRow(
-      blockingInfo.blocking,
-      'Blocking',
-      onBlockingClick
-    );
+    const blockingRow = createBlockRow(blockingInfo.blocking, 'Blocking', onBlockingClick);
     container.appendChild(blockingRow);
   } else {
     container.appendChild(createTextOnlyRow('Not blocking anyone you follow'));
@@ -491,9 +499,10 @@ function injectContainer(
   };
 
   // Create display based on mode
-  const container = displayMode === 'compact'
-    ? createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick)
-    : createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick);
+  const container =
+    displayMode === 'compact'
+      ? createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick)
+      : createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick);
 
   // Insert after the insertion point
   if (insertionPoint.nextSibling) {
@@ -729,7 +738,7 @@ async function injectBlockingInfo(): Promise<void> {
  */
 function isExtensionContextValid(): boolean {
   try {
-    return !!(chrome?.runtime?.id);
+    return !!chrome?.runtime?.id;
   } catch {
     return false;
   }
@@ -847,16 +856,20 @@ function observeNavigation(): void {
   });
 
   // Listen for clicks on links (catches SPA navigation more reliably)
-  document.addEventListener('click', (e) => {
-    const target = e.target as HTMLElement;
-    const link = target.closest('a');
-    if (link?.href?.includes('/profile/')) {
-      // Delay to let the navigation happen first
-      setTimeout(() => {
-        handleUrlChange();
-      }, 100);
-    }
-  }, true);
+  document.addEventListener(
+    'click',
+    (e) => {
+      const target = e.target as HTMLElement;
+      const link = target.closest('a');
+      if (link?.href?.includes('/profile/')) {
+        // Delay to let the navigation happen first
+        setTimeout(() => {
+          handleUrlChange();
+        }, 100);
+      }
+    },
+    true
+  );
 
   // Intercept History API for SPA navigation
   const originalPushState = history.pushState;
@@ -900,7 +913,8 @@ async function syncAuthToBackground(): Promise<void> {
       console.log('[AskBeeves] Failed to sync auth:', error);
     }
   } else {
-    console.log('[AskBeeves] No valid session found - missing:',
+    console.log(
+      '[AskBeeves] No valid session found - missing:',
       !session?.accessJwt ? 'accessJwt' : '',
       !session?.did ? 'did' : '',
       !session?.pdsUrl ? 'pdsUrl' : ''

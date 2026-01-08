@@ -494,7 +494,9 @@ describe('Background Service Worker', () => {
         lastFullSync: 0,
         currentUserDid: 'did:me',
       });
-      vi.mocked(getAllFollows).mockResolvedValueOnce([{ did: 'did:user1', handle: 'user1.bsky.social' }]);
+      vi.mocked(getAllFollows).mockResolvedValueOnce([
+        { did: 'did:user1', handle: 'user1.bsky.social' },
+      ]);
       vi.mocked(getUserBlocks).mockResolvedValue([]);
       vi.mocked(saveBlockCache).mockResolvedValue(undefined);
       vi.mocked(updateSyncStatus).mockResolvedValue(undefined);

@@ -106,7 +106,9 @@ async function performFullSync(): Promise<void> {
       console.log('[AskBeeves BG] Sync already in progress, skipping');
       return;
     }
-    console.log(`[AskBeeves BG] Stale lock detected (${Math.round(timeSinceUpdate / 1000)}s old), resetting...`);
+    console.log(
+      `[AskBeeves BG] Stale lock detected (${Math.round(timeSinceUpdate / 1000)}s old), resetting...`
+    );
     await updateSyncStatus({ isRunning: false });
   }
 
@@ -133,7 +135,9 @@ async function performFullSync(): Promise<void> {
     // Proactively prune if cache is already too large
     const initialSize = estimateObjectSize(cache);
     if (initialSize > MAX_CACHE_SIZE_BYTES * 0.9) {
-      console.log(`[AskBeeves BG] Cache size (${Math.round(initialSize / 1024 / 1024)}MB) approaching limit, pruning...`);
+      console.log(
+        `[AskBeeves BG] Cache size (${Math.round(initialSize / 1024 / 1024)}MB) approaching limit, pruning...`
+      );
       pruneCache(cache);
       await safeSaveBlockCache(cache);
     }
@@ -294,7 +298,9 @@ async function handleSyncMessage(
           // Also sync if we have follows but very few block caches (incomplete sync)
           const blockCacheCount = cache ? Object.keys(cache.userBlockCaches).length : 0;
           const cacheIncomplete =
-            cache && cache.followedUsers.length > 100 && blockCacheCount < cache.followedUsers.length * 0.05;
+            cache &&
+            cache.followedUsers.length > 100 &&
+            blockCacheCount < cache.followedUsers.length * 0.05;
 
           if (isNewUser || cacheIsEmpty || cacheIncomplete) {
             console.log(
@@ -320,7 +326,10 @@ async function handleSyncMessage(
         const cache = await getBlockCache();
         const cacheCount = cache ? Object.keys(cache.userBlockCaches).length : 0;
         const totalBlocks = cache
-          ? Object.values(cache.userBlockCaches).reduce((sum, uc) => sum + (uc.blocks?.length || 0), 0)
+          ? Object.values(cache.userBlockCaches).reduce(
+              (sum, uc) => sum + (uc.blocks?.length || 0),
+              0
+            )
           : 0;
         console.log(
           '[AskBeeves BG] Cache state:',
