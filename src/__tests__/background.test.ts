@@ -347,9 +347,75 @@ describe('Background Service Worker', () => {
         error: 'Unknown message type',
       });
     });
+    it('should handle CLEAR_CACHE message', async () => {
+      const { createEmptyCache, saveBlockCache, updateSyncStatus } = await import('../storage.js');
+
+      vi.mocked(createEmptyCache).mockReturnValueOnce({
+        followedUsers: [],
+        userBlockCaches: {},
+        lastFullSync: 0,
+        currentUserDid: '',
+      });
+      vi.mocked(saveBlockCache).mockResolvedValue(undefined);
+      vi.mocked(updateSyncStatus).mockResolvedValue(undefined);
+
+      const messageListener = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls[0][0];
+      const sendResponse = vi.fn();
+
+      messageListener({ type: 'CLEAR_CACHE' }, {} as chrome.runtime.MessageSender, sendResponse);
+
+      // Wait for async handler
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      expect(saveBlockCache).toHaveBeenCalled();
+      expect(updateSyncStatus).toHaveBeenCalledWith(
+        expect.objectContaining({
+          totalFollows: 0,
+          isRunning: false,
+        })
+      );
+      expect(sendResponse).toHaveBeenCalledWith({ success: true });
+    });
   });
 
   describe('Sync functionality', () => {
+    it('should reset stale lock and continue sync', async () => {
+      const { getSyncStatus, getStoredAuth, updateSyncStatus } = await import('../storage.js');
+      const { getAllFollows } = await import('../api.js');
+
+      // Stale lock (older than 5 minutes)
+      vi.mocked(getSyncStatus).mockResolvedValueOnce({
+        totalFollows: 100,
+        syncedFollows: 50,
+        lastSync: 0,
+        isRunning: true,
+        lastUpdated: Date.now() - 6 * 60 * 1000,
+        errors: [],
+      });
+
+      vi.mocked(getStoredAuth).mockResolvedValueOnce({
+        accessJwt: 'jwt',
+        did: 'did:me',
+        handle: 'me.bsky.social',
+        pdsUrl: 'https://pds.test.com',
+      });
+
+      vi.mocked(getAllFollows).mockResolvedValueOnce([]);
+      vi.mocked(updateSyncStatus).mockResolvedValue(undefined);
+
+      await import('../background.js');
+      const messageListener = vi.mocked(chrome.runtime.onMessage.addListener).mock.calls[0][0];
+
+      messageListener({ type: 'TRIGGER_SYNC' }, {} as chrome.runtime.MessageSender, vi.fn());
+
+      await new Promise((resolve) => setTimeout(resolve, 200));
+
+      // Should have called updateSyncStatus to reset lock
+      expect(updateSyncStatus).toHaveBeenCalledWith({ isRunning: false });
+      // And continued to sync
+      expect(getAllFollows).toHaveBeenCalled();
+    });
+
     it('should skip sync if already running', async () => {
       const { getSyncStatus } = await import('../storage.js');
 
