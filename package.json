@@ -1,6 +1,6 @@
 {
   "name": "askbeeves",
-  "version": "1.0.0",
+  "version": "1.2.2",
   "description": "See who you follow that blocks or is blocked by a Bluesky profile",
   "type": "module",
   "engines": {

@@ -1,1 +1,1 @@
-npm run sync-version && npx lint-staged
+npm run sync-version && ./node_modules/.bin/lint-staged

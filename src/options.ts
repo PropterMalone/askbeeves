@@ -57,7 +57,11 @@ export async function loadSyncStatus(): Promise<void> {
       statusEl.textContent = '';
 
       // Build DOM elements safely (avoids XSS)
-      const createStatusRow = (label: string, value: string | number, color?: string): HTMLDivElement => {
+      const createStatusRow = (
+        label: string,
+        value: string | number,
+        color?: string
+      ): HTMLDivElement => {
         const row = document.createElement('div');
         const strong = document.createElement('strong');
         strong.textContent = `${label}: `;
