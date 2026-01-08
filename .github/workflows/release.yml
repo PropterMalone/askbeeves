@@ -1,0 +1,79 @@
+name: Auto Release
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    paths-ignore:
+      - '.github/**'
+      - '**.md'
+
+jobs:
+  check-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create releases and tags
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Needed for checking existing tags
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Get version from package.json
+        id: package-version
+        run: echo "version=$(node -p "require('./package.json').version")" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: check-tag
+        run: |
+          if git rev-parse "v${{ steps.package-version.outputs.version }}" >/dev/null 2>&1; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "Tag v${{ steps.package-version.outputs.version }} already exists. Skipping release."
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install Dependencies
+        if: steps.check-tag.outputs.exists == 'false'
+        run: npm ci
+
+      - name: Run Validation
+        if: steps.check-tag.outputs.exists == 'false'
+        run: npm run validate
+
+      - name: Build Extension
+        if: steps.check-tag.outputs.exists == 'false'
+        run: npm run build
+
+      - name: Zip Extension
+        if: steps.check-tag.outputs.exists == 'false'
+        run: |
+          cd dist
+          zip -r ../askbeeves-v${{ steps.package-version.outputs.version }}.zip ./*
+          cd ..
+
+      - name: Create Tag
+        if: steps.check-tag.outputs.exists == 'false'
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag -a v${{ steps.package-version.outputs.version }} -m "Release v${{ steps.package-version.outputs.version }}"
+          git push origin v${{ steps.package-version.outputs.version }}
+
+      - name: Create Release
+        if: steps.check-tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.package-version.outputs.version }}
+          name: v${{ steps.package-version.outputs.version }}
+          files: askbeeves-v${{ steps.package-version.outputs.version }}.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: false
