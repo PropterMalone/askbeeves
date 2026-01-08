@@ -298,9 +298,7 @@ describe('Storage Module', () => {
 
     it('should return empty array when no one blocks the profile', async () => {
       const mockCache = {
-        followedUsers: [
-          { did: 'did:user1', handle: 'user1.bsky.social' },
-        ],
+        followedUsers: [{ did: 'did:user1', handle: 'user1.bsky.social' }],
         userBlockCaches: {
           'did:user1': {
             did: 'did:user1',
