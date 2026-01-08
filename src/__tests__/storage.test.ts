@@ -129,6 +129,13 @@ describe('Storage Module', () => {
       expect((callArg.blockCache as Record<string, unknown>).userBlockCaches).toBeDefined();
     });
 
+    it('should return immediately if no cache exists', async () => {
+      mockStorageLocalGet.mockResolvedValueOnce({});
+      const userCache = { did: 'did:1', handle: 'h', blocks: [], lastSynced: 0 };
+      await updateUserBlockCache(userCache);
+      expect(mockStorageLocalSet).not.toHaveBeenCalled();
+    });
+
     it('should handle missing cache gracefully', async () => {
       mockStorageLocalGet.mockResolvedValueOnce({});
 
@@ -298,9 +305,7 @@ describe('Storage Module', () => {
 
     it('should return empty array when no one blocks the profile', async () => {
       const mockCache = {
-        followedUsers: [
-          { did: 'did:user1', handle: 'user1.bsky.social' },
-        ],
+        followedUsers: [{ did: 'did:user1', handle: 'user1.bsky.social' }],
         userBlockCaches: {
           'did:user1': {
             did: 'did:user1',
@@ -321,9 +326,83 @@ describe('Storage Module', () => {
 
       expect(blockers).toEqual([]);
     });
+    it('should handle large block lists efficiently', async () => {
+      // Generate 25 blocks to trigger Set optimization (>20)
+      const blocks = Array.from({ length: 25 }, (_, i) => `did:block${i}`);
+      blocks.push('did:profile');
+
+      const mockCache = {
+        followedUsers: [{ did: 'did:user1', handle: 'user1.bsky.social' }],
+        userBlockCaches: {
+          'did:user1': {
+            did: 'did:user1',
+            handle: 'user1.bsky.social',
+            blocks: blocks,
+            lastSynced: Date.now(),
+          },
+        },
+        lastFullSync: Date.now(),
+        currentUserDid: 'did:me',
+      };
+
+      mockStorageLocalGet.mockResolvedValueOnce({
+        blockCache: mockCache,
+      });
+
+      const blockers = await getBlockers('did:profile');
+      expect(blockers).toHaveLength(1);
+    });
+    it('should skip users with no block records', async () => {
+      const mockCache = {
+        followedUsers: [{ did: 'did:user1', handle: 'u1' }],
+        userBlockCaches: {
+          'did:user1': { did: 'did:user1', handle: 'u1', blocks: [], lastSynced: 0 },
+        },
+        lastFullSync: 0,
+        currentUserDid: 'did:me',
+      };
+      mockStorageLocalGet.mockResolvedValueOnce({ blockCache: mockCache });
+      const blockers = await getBlockers('did:any');
+      expect(blockers).toEqual([]);
+    });
   });
 
   describe('lookupBlockingInfo', () => {
+    it('should find users that the profile blocks when they are in follows', async () => {
+      const mockCache = {
+        followedUsers: [
+          { did: 'did:follow1', handle: 'user1' },
+          { did: 'did:follow2', handle: 'user2' },
+        ],
+        userBlockCaches: {},
+        lastFullSync: 0,
+        currentUserDid: 'did:me',
+      };
+      mockStorageLocalGet.mockResolvedValue({ blockCache: mockCache });
+
+      const result = await lookupBlockingInfo('did:profile', ['did:follow1']);
+      expect(result.blocking).toHaveLength(1);
+      expect(result.blocking[0].did).toBe('did:follow1');
+    });
+
+    it('should ignore blocked users not in follows list', async () => {
+      const mockCache = {
+        followedUsers: [{ did: 'did:user1', handle: 'user1.bsky.social' }],
+        userBlockCaches: {},
+        lastFullSync: 0,
+        currentUserDid: 'did:me',
+      };
+
+      mockStorageLocalGet.mockResolvedValue({
+        blockCache: mockCache,
+      });
+
+      const result = await lookupBlockingInfo('did:profile', ['did:user1', 'did:unknown']);
+
+      expect(result.blocking).toHaveLength(1);
+      expect(result.blocking[0].did).toBe('did:user1');
+    });
+
     it('should find users who block the profile from cached blocks', async () => {
       const mockCache = {
         followedUsers: [

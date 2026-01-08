@@ -44,7 +44,16 @@ describe('Options Page', () => {
   describe('init', () => {
     it('should set compact radio checked when displayMode is compact', async () => {
       vi.mocked(getSettings).mockResolvedValue({ displayMode: 'compact' });
-      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
+      mockSendMessageFn.mockResolvedValue({
+        success: true,
+        syncStatus: {
+          lastSync: 0,
+          totalFollows: 0,
+          syncedFollows: 0,
+          isRunning: false,
+          errors: [],
+        },
+      });
 
       // Import fresh module to trigger init
       const { init } = await import('../options.js');
@@ -59,7 +68,16 @@ describe('Options Page', () => {
 
     it('should set detailed radio checked when displayMode is detailed', async () => {
       vi.mocked(getSettings).mockResolvedValue({ displayMode: 'detailed' });
-      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
+      mockSendMessageFn.mockResolvedValue({
+        success: true,
+        syncStatus: {
+          lastSync: 0,
+          totalFollows: 0,
+          syncedFollows: 0,
+          isRunning: false,
+          errors: [],
+        },
+      });
 
       const { init } = await import('../options.js');
       await init();
@@ -72,7 +90,16 @@ describe('Options Page', () => {
     });
 
     it('should add change listeners to radio buttons', async () => {
-      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
+      mockSendMessageFn.mockResolvedValue({
+        success: true,
+        syncStatus: {
+          lastSync: 0,
+          totalFollows: 0,
+          syncedFollows: 0,
+          isRunning: false,
+          errors: [],
+        },
+      });
 
       const { init } = await import('../options.js');
       await init();
@@ -88,7 +115,16 @@ describe('Options Page', () => {
     });
 
     it('should add click listeners to buttons', async () => {
-      mockSendMessageFn.mockResolvedValue({ success: true, syncStatus: { lastSync: 0, totalFollows: 0, syncedFollows: 0, isRunning: false, errors: [] } });
+      mockSendMessageFn.mockResolvedValue({
+        success: true,
+        syncStatus: {
+          lastSync: 0,
+          totalFollows: 0,
+          syncedFollows: 0,
+          isRunning: false,
+          errors: [],
+        },
+      });
 
       const { init } = await import('../options.js');
       await init();
@@ -227,7 +263,16 @@ describe('Options Page', () => {
     it('should reload status after 1 second', async () => {
       mockSendMessageFn
         .mockResolvedValueOnce({ success: true }) // TRIGGER_SYNC
-        .mockResolvedValueOnce({ success: true, syncStatus: { lastSync: Date.now(), totalFollows: 10, syncedFollows: 10, isRunning: false, errors: [] } }); // GET_SYNC_STATUS
+        .mockResolvedValueOnce({
+          success: true,
+          syncStatus: {
+            lastSync: Date.now(),
+            totalFollows: 10,
+            syncedFollows: 10,
+            isRunning: false,
+            errors: [],
+          },
+        }); // GET_SYNC_STATUS
 
       const { triggerSync } = await import('../options.js');
       await triggerSync();
@@ -315,6 +360,25 @@ describe('Options Page', () => {
 
       // Should not throw
       expect(saveSettings).toHaveBeenCalled();
+    });
+  });
+
+  describe('event listener', () => {
+    it('should add DOMContentLoaded listener if state is loading', async () => {
+      // Mock readyState
+      Object.defineProperty(document, 'readyState', {
+        get() {
+          return 'loading';
+        },
+        configurable: true,
+      });
+      const addEventListenerSpy = vi.spyOn(document, 'addEventListener');
+
+      // Re-import module
+      vi.resetModules();
+      await import('../options.js');
+
+      expect(addEventListenerSpy).toHaveBeenCalledWith('DOMContentLoaded', expect.any(Function));
     });
   });
 });

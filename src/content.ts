@@ -22,7 +22,8 @@ let lastProfileDid: string | null = null;
 let cachedAvatarStyle: { size: string; overlap: string } | null = null;
 
 // Default avatar SVG as data URI (computed once)
-const DEFAULT_AVATAR = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
+const DEFAULT_AVATAR =
+  'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="12" fill="%23ccc"/></svg>';
 
 /**
  * Validate and sanitize avatar URL to prevent XSS via javascript: URIs
@@ -218,7 +219,9 @@ function createAvatarRow(
     avatar.alt = user.displayName || user.handle;
     avatar.title = user.displayName || `@${user.handle}`;
     avatar.style.cssText = `width:${size};height:${size};border-radius:50%;object-fit:cover;margin-left:${i > 0 ? overlap : '0'};position:relative;z-index:${3 - i};box-shadow:0 0 0 2px white`;
-    avatar.onerror = () => { avatar.src = DEFAULT_AVATAR; };
+    avatar.onerror = () => {
+      avatar.src = DEFAULT_AVATAR;
+    };
     container.appendChild(avatar);
   }
 
@@ -237,10 +240,12 @@ function showFullListModal(
 
   const overlay = document.createElement('div');
   overlay.id = 'askbeeves-full-list-modal';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10001';
+  overlay.style.cssText =
+    'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:10001';
 
   const dialog = document.createElement('div');
-  dialog.style.cssText = 'background:white;border-radius:12px;padding:20px;min-width:320px;max-width:480px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+  dialog.style.cssText =
+    'background:white;border-radius:12px;padding:20px;min-width:320px;max-width:480px;max-height:60vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.2);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
 
   const titleEl = document.createElement('h3');
   titleEl.style.cssText = 'margin:0 0 16px 0;font-size:16px;font-weight:600;color:#425780';
@@ -253,13 +258,16 @@ function showFullListModal(
   const fragment = document.createDocumentFragment();
   for (const user of users) {
     const item = document.createElement('div');
-    item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb';
+    item.style.cssText =
+      'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e5e7eb';
 
     const avatar = document.createElement('img');
     avatar.src = getSafeAvatarUrl(user.avatar);
     avatar.alt = user.displayName || user.handle;
     avatar.style.cssText = 'width:32px;height:32px;border-radius:50%;object-fit:cover';
-    avatar.onerror = () => { avatar.src = DEFAULT_AVATAR; };
+    avatar.onerror = () => {
+      avatar.src = DEFAULT_AVATAR;
+    };
 
     const textContainer = document.createElement('div');
     textContainer.style.cssText = 'display:flex;flex-direction:column';
@@ -283,13 +291,16 @@ function showFullListModal(
   listEl.appendChild(fragment);
 
   const closeBtn = document.createElement('button');
-  closeBtn.style.cssText = 'margin-top:16px;padding:10px 16px;border:none;border-radius:8px;background:#1083fe;color:white;cursor:pointer;font-size:14px;font-weight:600;width:100%';
+  closeBtn.style.cssText =
+    'margin-top:16px;padding:10px 16px;border:none;border-radius:8px;background:#1083fe;color:white;cursor:pointer;font-size:14px;font-weight:600;width:100%';
   closeBtn.textContent = 'Close';
   closeBtn.onclick = () => overlay.remove();
 
   dialog.append(titleEl, listEl, closeBtn);
   overlay.appendChild(dialog);
-  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+  overlay.onclick = (e) => {
+    if (e.target === overlay) overlay.remove();
+  };
 
   document.body.appendChild(overlay);
 }
@@ -314,7 +325,12 @@ function createCompactDisplay(
   const blockedByCount = blockingInfo.blockedBy.length;
   const blockingCount = blockingInfo.blocking.length;
 
-  console.log('[AskBeeves] Compact display - blockedBy:', blockedByCount, 'blocking:', blockingCount);
+  console.log(
+    '[AskBeeves] Compact display - blockedBy:',
+    blockedByCount,
+    'blocking:',
+    blockingCount
+  );
 
   // If nothing to show
   if (blockedByCount === 0 && blockingCount === 0) {
@@ -454,11 +470,7 @@ function createDetailedDisplay(
 
   // "Blocked by" section
   if (blockingInfo.blockedBy.length > 0) {
-    const blockedByRow = createBlockRow(
-      blockingInfo.blockedBy,
-      'Blocked by',
-      onBlockedByClick
-    );
+    const blockedByRow = createBlockRow(blockingInfo.blockedBy, 'Blocked by', onBlockedByClick);
     container.appendChild(blockedByRow);
   } else {
     container.appendChild(createTextOnlyRow('Not blocked by anyone you follow'));
@@ -466,11 +478,7 @@ function createDetailedDisplay(
 
   // "Blocking" section
   if (blockingInfo.blocking.length > 0) {
-    const blockingRow = createBlockRow(
-      blockingInfo.blocking,
-      'Blocking',
-      onBlockingClick
-    );
+    const blockingRow = createBlockRow(blockingInfo.blocking, 'Blocking', onBlockingClick);
     container.appendChild(blockingRow);
   } else {
     container.appendChild(createTextOnlyRow('Not blocking anyone you follow'));
@@ -504,9 +512,10 @@ function injectContainer(
   };
 
   // Create display based on mode
-  const container = displayMode === 'compact'
-    ? createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick)
-    : createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick);
+  const container =
+    displayMode === 'compact'
+      ? createCompactDisplay(blockingInfo, onBlockedByClick, onBlockingClick)
+      : createDetailedDisplay(blockingInfo, onBlockedByClick, onBlockingClick);
 
   // Insert after the insertion point
   if (insertionPoint.nextSibling) {
@@ -564,7 +573,9 @@ function startContainerGuard(): void {
  * Wait for profile insertion point to appear (with timeout)
  * Uses polling with increasing intervals for better reliability
  */
-async function waitForProfileInsertionPoint(maxWaitMs: number = 10000): Promise<HTMLElement | null> {
+async function waitForProfileInsertionPoint(
+  maxWaitMs: number = 10000
+): Promise<HTMLElement | null> {
   return new Promise((resolve) => {
     const startTime = Date.now();
     let attempts = 0;
@@ -573,7 +584,9 @@ async function waitForProfileInsertionPoint(maxWaitMs: number = 10000): Promise<
       attempts++;
       const element = findProfileInsertionPoint();
       if (element) {
-        console.log(`[AskBeeves] Found insertion point after ${attempts} attempts, ${Date.now() - startTime}ms`);
+        console.log(
+          `[AskBeeves] Found insertion point after ${attempts} attempts, ${Date.now() - startTime}ms`
+        );
         resolve(element);
         return;
       }
@@ -584,7 +597,9 @@ async function waitForProfileInsertionPoint(maxWaitMs: number = 10000): Promise<
         const interval = attempts < 10 ? 50 : attempts < 20 ? 100 : 200;
         setTimeout(check, interval);
       } else {
-        console.log(`[AskBeeves] Insertion point not found after ${attempts} attempts, ${elapsed}ms`);
+        console.log(
+          `[AskBeeves] Insertion point not found after ${attempts} attempts, ${elapsed}ms`
+        );
         resolve(null);
       }
     };
@@ -896,29 +911,34 @@ function observeNavigation(): void {
 
   // Listen for ALL clicks and check URL after a delay
   // This catches profile picture clicks that may use various navigation mechanisms
-  document.addEventListener('click', (e) => {
-    const target = e.target as HTMLElement;
+  document.addEventListener(
+    'click',
+    (e) => {
+      const target = e.target as HTMLElement;
 
-    // Check if click is on or near a profile-related element
-    // This includes: links to profiles, avatar images, user cards, etc.
-    const link = target.closest('a');
-    const isProfileLink = link?.href?.includes('/profile/');
+      // Check if click is on or near a profile-related element
+      // This includes: links to profiles, avatar images, user cards, etc.
+      const link = target.closest('a');
+      const isProfileLink = link?.href?.includes('/profile/');
 
-    // Also check for clicks on images (avatars) that might be inside links
-    const isAvatarClick = target.tagName === 'IMG' || target.closest('img') !== null;
+      // Also check for clicks on images (avatars) that might be inside links
+      const isAvatarClick = target.tagName === 'IMG' || target.closest('img') !== null;
 
-    // Check for clicks on elements with profile-related data attributes or classes
-    const hasProfileRole = target.closest('[data-testid*="avatar"]') !== null ||
-                          target.closest('[data-testid*="profile"]') !== null;
+      // Check for clicks on elements with profile-related data attributes or classes
+      const hasProfileRole =
+        target.closest('[data-testid*="avatar"]') !== null ||
+        target.closest('[data-testid*="profile"]') !== null;
 
-    if (isProfileLink || isAvatarClick || hasProfileRole) {
-      // Check URL at multiple intervals to catch navigation
-      // Different SPAs may update URL at different times
-      setTimeout(() => handleUrlChange(), 50);
-      setTimeout(() => handleUrlChange(), 150);
-      setTimeout(() => handleUrlChange(), 300);
-    }
-  }, true);
+      if (isProfileLink || isAvatarClick || hasProfileRole) {
+        // Check URL at multiple intervals to catch navigation
+        // Different SPAs may update URL at different times
+        setTimeout(() => handleUrlChange(), 50);
+        setTimeout(() => handleUrlChange(), 150);
+        setTimeout(() => handleUrlChange(), 300);
+      }
+    },
+    true
+  );
 
   // Intercept History API for SPA navigation
   const originalPushState = history.pushState;
@@ -977,7 +997,8 @@ async function syncAuthToBackground(): Promise<void> {
       console.log('[AskBeeves] Failed to sync auth:', error);
     }
   } else {
-    console.log('[AskBeeves] No valid session found - missing:',
+    console.log(
+      '[AskBeeves] No valid session found - missing:',
       !session?.accessJwt ? 'accessJwt' : '',
       !session?.did ? 'did' : '',
       !session?.pdsUrl ? 'pdsUrl' : ''
