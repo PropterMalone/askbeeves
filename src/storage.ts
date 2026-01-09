@@ -120,11 +120,7 @@ export async function getBlockers(
     const userCache = blockCache.userBlockCaches[user.did];
     if (!userCache?.blocks?.length) continue;
 
-    // Use Set for O(1) lookup when block list is large
-    const hasBlock =
-      userCache.blocks.length > 20
-        ? new Set(userCache.blocks).has(profileDid)
-        : userCache.blocks.includes(profileDid);
+    const hasBlock = userCache.blocks.includes(profileDid);
 
     if (hasBlock) {
       blockers.push({
