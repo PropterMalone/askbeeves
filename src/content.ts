@@ -91,17 +91,22 @@ function findProfileInsertionPoint(): HTMLElement | null {
   const followersElement = followersResult.singleNodeValue as HTMLElement | null;
 
   if (followersElement) {
-    // Walk up to find a suitable container
+    // Walk up to find a flex row inside a flex column (like Strategy 1)
     let parent = followersElement.parentElement;
-    let depth = 0;
-    while (parent && depth < 5) {
+    while (parent) {
       const style = window.getComputedStyle(parent);
-      if (style.display === 'flex') {
-        return parent;
+      if (style.display === 'flex' && style.flexDirection === 'row') {
+        const grandparent = parent.parentElement;
+        if (grandparent) {
+          const gpStyle = window.getComputedStyle(grandparent);
+          if (gpStyle.display === 'flex' && gpStyle.flexDirection === 'column') {
+            return parent;
+          }
+        }
       }
       parent = parent.parentElement;
-      depth++;
     }
+    // Fallback: return immediate parent
     return followersElement.parentElement;
   }
 
